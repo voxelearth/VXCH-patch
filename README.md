@@ -113,7 +113,31 @@ If there's any problems with the voxelization that need to be fixed, the followi
 **GPU Voxelization:**\
 *(Currently Linux-only / WSL2)*\
 For GPU voxelization, you'll need to install the CUDA toolkit and ensure your system has a NVIDIA GPU. We recommend [WSL2 copy-paste commands from NVIDIA](https://developer.nvidia.com/cuda-downloads?target_os=Linux&target_arch=x86_64&Distribution=WSL-Ubuntu&target_version=2.0&target_type=deb_local).
-1. **Install Dependencies**: First, create a [Google Draco](https://github.com/google/draco) build for compression:
+
+If you end up needing to setup NVIDIA drivers- make sure to run these commands after using theirs.
+   ```bash
+export PATH=/usr/local/cuda/bin:$PATH
+export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
+
+source ~/.bashrc
+nvcc --version
+   ```
+NVCC should print a version if installed correctly.
+
+**Locating Files**: First, let's copy trimesh2 and cuda_voxelizer directly to home for our Makefiles direct reference.
+```bash
+cp -r ~/voxelearth/trimesh2/ ~
+cp -r ~/voxelearth/cuda_voxelizer/ ~
+```
+And we'll also need to install some libraries for Trimesh2 to build correctly.
+```bash
+sudo apt install libgl-dev
+sudo apt install libglu-dev
+sudo apt install libxi-dev
+```
+
+
+1. **Google Draco**: First, create a [Google Draco](https://github.com/google/draco) build for compression:
    ```bash
    cd ~
    git clone https://github.com/google/draco.git
@@ -122,28 +146,39 @@ For GPU voxelization, you'll need to install the CUDA toolkit and ensure your sy
    cd build
    cmake ..
    make
+
+   cp -r ~/draco/src/draco ~/trimesh2/include/
+   cp -r ~/draco/build/draco/* ~/trimesh2/include/draco/
    ```
    
 2. **Trimesh2**: First, we have to set up the primary dependency of cuda_voxelizer:
    ```bash
    cd trimesh2
+   chmod 777 copyFiles.sh
    ./copyFiles.sh
    ```
-   You may have to `sudo chmod +x copyFiles.sh`. It's just a script to automatically build and copy Trimesh2 files directly for cuda_voxelizer.
+   This script will automatically build and copy Trimesh2 files directly for cuda_voxelizer.
 
 3. **cuda_voxelizer**: Finally, to set up our GPU voxelizer, follow these steps:
    ```bash
-   cd cuda_voxelizer/build
+   cd cuda_voxelizer
+   chmod 777 build.sh
    ./build.sh
    ```
-   This will build the voxelizer and place it in the `cuda_voxelizer/build` directory. If you have any issues building, you may need to adjust the `build.sh` file to reference your correct CUDA architecture (60, 70, 80, 90, etc).
+   This will build the voxelizer and place it in the `cuda_voxelizer/build` directory.
+   You can run it via..
+   ```bash 
+   chmod 777 build/cuda_voxelizer
+   ./build/cuda_voxelizer
+   ```
 
 4. **Run test voxelizer**: Use the produced binary to debug and test voxelization.
    ```bash
-   ./cuda_voxelizer -f myfile.glb -s 64 -o glb
+   ./build/cuda_voxelizer -f myfile.glb -s 64 -o glb
    # Or, if you want to try out JSON for Minecraft
-   ./cuda_voxelizer -f myfile.glb -s 64 -o json
+   ./build/cuda_voxelizer -f myfile.glb -s 64 -o json
    ```
+   Remember - if you copy the binary to another folder you may have to fix the permissions again via chmod 777.
 
 If there's any problems with the voxelization that need to be fixed, the following files are likely the culprits:
    
@@ -170,6 +205,16 @@ java -Xms512M -Xmx1024M -jar spigot-1.20.5.jar nogui
 echo "eula=true" > eula.txt
 ```
 
+Finally, copy over the voxelization files. In future versions, this should be inside Java plugin, 
+but for right now it's easier to develop via bindings to our Python and NodeJS code.
+```bash
+cd ~/voxelearth/minecraft-plugin/
+cp -r ./server-folder-items/* ~/spigot-server/
+chmod 777 ~/spigot-server/cuda_voxelizer
+cd ~/spigot-server/scripts/
+npm install
+```
+
 Now, to develop the plugin, you can edit the files in `~/voxelearth/minecraft-plugin/`, and keep rebuilding and copying the jar to the server:
 ```bash
 cd ~/voxelearth/minecraft-plugin/
@@ -186,6 +231,22 @@ If there's any problems with the Minecraft plugin, the main file that should be 
    
    [**VoxelChunkGenerator.java**](minecraft-plugin/src/main/java/com/example/VoxelChunkGenerator.jav): This is the main file that handles mapping the player's location to a latitude and longitude, then loading the voxelized GLB into the Minecraft world.
    
+
+Currently, new tiles are populated when the server is booted and does not have a 'world' folder. If the "0,0" chunk is loaded, then you will see the console begin to download and convert tiles. Buggy servers will sometimes not load 0,0, if this is the case, delete the world folder and restart the server.
+
+Inside your server with the Voxel Earth plugin, there are two commands so far:
+```yml
+  regenchunks:
+    description: Regenerate chunks with new scale and offsets.
+    usage: /regenchunks <scale> <offsetX> <offsetY> <offsetZ>
+  loadjson:
+    description: Load a JSON file and apply scaling and offset.
+    usage: /loadjson <filename> <scaleX> <scaleY> <scaleZ> <offsetX> <offsetY> <offsetZ>
+```
+RegenChunks will use the initial tileset from tiles0_0 folder and spawn in the tiles again. It does not fetch new tiles. That is in future work.
+
+LoadJSON will use a relative JSON file location to the server directory and spawn it in. This is primarily for debugging.
+
 
 ### Included Libraries
 This project includes modified versions of the following libraries:

@@ -476,3 +476,6 @@ ModelManifest.xml
 
 draco/
 *OBJ.Linux64*/
+*.class
+/minecraft-plugin/target
+*.class
