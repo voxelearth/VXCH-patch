@@ -37,6 +37,7 @@ import org.bukkit.Material;
 
 // player
 import java.util.UUID;
+import org.bukkit.entity.Player;
 
 public class VoxelChunkGenerator extends ChunkGenerator {
 
@@ -66,6 +67,12 @@ public class VoxelChunkGenerator extends ChunkGenerator {
     private double scaleX = scaleFactor;
     private double scaleY = scaleFactor;
     private double scaleZ = scaleFactor;
+
+    public void resetOriginForVisit(UUID playerUUID) {
+        // Ensure the origin is reset before each visit
+        playerOrigins.remove(playerUUID);
+    }
+    
 
     private static final String SESSION_DIR = "./session";
     private static final long CLEANUP_INTERVAL = TimeUnit.HOURS.toMillis(1); // 1 hour
@@ -661,7 +668,7 @@ public class VoxelChunkGenerator extends ChunkGenerator {
                 System.out.println("[DEBUG] loadChunk: tileX=" + tileX + ", tileZ=" + tileZ + " -> lat/lng=" + latLng[0] + "," + latLng[1]);
 
                 tileDownloader.setCoordinates(latLng[1], latLng[0]);
-                tileDownloader.setRadius(500);
+                tileDownloader.setRadius(25);
 
                 System.out.println("[DEBUG] Downloading single tile at lat=" + latLng[0] + ", lng=" + latLng[1] + " with radius 25");
                 List<String> downloadedTileFiles = tileDownloader.downloadTiles(outputDirectory);
@@ -881,8 +888,8 @@ public class VoxelChunkGenerator extends ChunkGenerator {
     //     return new double[]{x, z};
     // }
 
-    int oldOffsetXX = 7677201 - 7677296;
-    int oldOffsetZZ = -11936601 - (-11937070);
+    int oldOffsetXX = 7677201 - 7677296; // -95
+    int oldOffsetZZ = -11936601 - (-11937070); // 468
 
     // int newOffsetXX = oldOffsetXX * 5;
     // int newOffsetZZ = oldOffsetZZ * 5;
@@ -893,6 +900,62 @@ public class VoxelChunkGenerator extends ChunkGenerator {
 // Suppose old offsets were chosen for the old scale; now multiply them by 5 to compensate.
 int newOffsetXX = oldOffsetXX * 5;
 int newOffsetZZ = oldOffsetZZ * 5;
+
+public double getPlayerLatitude(UUID playerUUID) {
+    // Get the player's current position
+    Player player = Bukkit.getPlayer(playerUUID);
+    if (player == null) {
+        return 0.0;  // If player is not online, return a default value (handle this case)
+    }
+
+    // Convert the player's Minecraft X and Z position to latitude/longitude
+    double x = player.getLocation().getX();
+    double z = player.getLocation().getZ();
+
+    // Convert Minecraft coordinates to lat/lng using your existing conversion
+    double[] latLng = minecraftToLatLng((int) x, (int) z);
+
+    // Return the latitude from the conversion
+    return latLng[0];  // latLng[0] contains the latitude
+}
+
+public double getPlayerLongitude(UUID playerUUID) {
+    // Get the player's current position
+    Player player = Bukkit.getPlayer(playerUUID);
+    if (player == null) {
+        return 0.0;  // If player is not online, return a default value (handle this case)
+    }
+
+    // Convert the player's Minecraft X and Z position to latitude/longitude
+    double x = player.getLocation().getX();
+    double z = player.getLocation().getZ();
+
+    // Convert Minecraft coordinates to lat/lng using your existing conversion method
+    double[] latLng = minecraftToLatLng((int) x, (int) z);
+
+    // Return the longitude from the conversion (latLng[1] contains the longitude)
+    return latLng[1];  // latLng[1] is the longitude
+}
+
+
+public void updateOffsetsForLocation(UUID playerUUID) {
+    // Get the player's current latitude and longitude from their Minecraft position (or calculate it based on their X/Z)
+    double latitude = getPlayerLatitude(playerUUID);
+    double longitude = getPlayerLongitude(playerUUID);  // A similar function to get longitude if needed
+
+    // Apply dynamic sign flipping based on player's location (especially longitude and latitude)
+    int signAdjustmentX = (longitude >= 0) ? 1 : -1;  // +1 for East, -1 for West
+    int signAdjustmentZ = (latitude >= 0) ? 1 : -1;   // +1 for North, -1 for South
+
+    // Adjust the offsets for the X and Z coordinates based on the player's location
+    newOffsetXX = (int) (oldOffsetXX * signAdjustmentX);
+    newOffsetZZ = (int) (oldOffsetZZ * signAdjustmentZ);
+
+    // Debug: Print out the adjusted offsets for verification
+    System.out.println("Updated Offsets for Player " + playerUUID + ": X=" + newOffsetXX + ", Z=" + newOffsetZZ);
+}
+
+
 
 // Try removing 1.00037 and 0.99999. If you must keep them, ensure they are used in both directions consistently.
 

@@ -29,18 +29,26 @@ public class VoxelEarth extends JavaPlugin {
     // Hold a single instance of VoxelChunkGenerator
     private VoxelChunkGenerator voxelChunkGenerator;
 
+    private PlayerMovementListener playerMovementListener;
+
     @Override
     public void onEnable() {
         getLogger().info("VoxelEarth has been enabled");
         
         // Register the player movement listener
-        getServer().getPluginManager().registerEvents(new PlayerMovementListener(this), this);
+        // getServer().getPluginManager().registerEvents(new PlayerMovementListener(this), this);
+        playerMovementListener = new PlayerMovementListener(this);
+        getServer().getPluginManager().registerEvents(playerMovementListener, this);
         getLogger().info("Player movement listener registered successfully");
 
 
         // Re-attach the generator to the existing world
         reattachGeneratorToWorld("world");
         getLogger().info("VoxelChunkGenerator re-attached to world 'world'");
+    }
+
+    public PlayerMovementListener getPlayerMovementListener() {
+        return playerMovementListener;
     }
 
     @Override
@@ -169,6 +177,15 @@ public class VoxelEarth extends JavaPlugin {
                         getLogger().info("Creating new VoxelChunkGenerator");
                         voxelChunkGenerator = new VoxelChunkGenerator();
                     }
+
+                    // Here's where we reset the player's origin
+                    // so the next time they move, a fresh origin is chosen
+                    PlayerMovementListener pml = getPlayerMovementListener();
+                    if (pml != null) {
+                        pml.resetPlayerOrigin(player.getUniqueId());
+                    }
+
+                    voxelChunkGenerator.resetOriginForVisit(player.getUniqueId());
 
                     // Convert lat/lng to Minecraft coordinates
                     int[] chunkCoords = voxelChunkGenerator.latLngToMinecraft(latLng[0], latLng[1]);
