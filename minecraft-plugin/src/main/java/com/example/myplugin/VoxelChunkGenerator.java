@@ -39,6 +39,10 @@ import org.bukkit.Material;
 import java.util.UUID;
 import org.bukkit.entity.Player;
 
+/**
+ * A profiled version of VoxelChunkGenerator that times major operations
+ * to identify performance bottlenecks.
+ */
 public class VoxelChunkGenerator extends ChunkGenerator {
 
     private static final double LAT_ORIGIN = 50.081033020810736;
@@ -68,25 +72,28 @@ public class VoxelChunkGenerator extends ChunkGenerator {
     private double scaleY = scaleFactor;
     private double scaleZ = scaleFactor;
 
-    public void resetOriginForVisit(UUID playerUUID) {
-        // Ensure the origin is reset before each visit
-        playerOrigins.remove(playerUUID);
-    }
-    
-
     private static final String SESSION_DIR = "./session";
     private static final long CLEANUP_INTERVAL = TimeUnit.HOURS.toMillis(1); // 1 hour
 
-    public VoxelChunkGenerator() {
-        System.out.println("[DEBUG] VoxelChunkGenerator initialized");
-        System.out.println("[DEBUG] LAT_ORIGIN: " + LAT_ORIGIN + ", LNG_ORIGIN: " + LNG_ORIGIN);
-        System.out.println("[DEBUG] Default scaleFactor (metersPerBlock): " + scaleFactor);
-        System.out.println("[DEBUG] Using a tile radius of 25 for single tile loading.");
+    // Removed or commented out debug prints; replaced with [PERF] timers where needed
 
-        tileDownloader = new TileDownloader(API_KEY, LNG_ORIGIN, LAT_ORIGIN, 25); 
+    public VoxelChunkGenerator() {
+        long start = System.currentTimeMillis();
+        // System.out.println("[DEBUG] VoxelChunkGenerator initialized");
+        // System.out.println("[DEBUG] LAT_ORIGIN: " + LAT_ORIGIN + ", LNG_ORIGIN: " + LNG_ORIGIN);
+        // System.out.println("[DEBUG] Default scaleFactor (metersPerBlock): " + scaleFactor);
+        // System.out.println("[DEBUG] Using a tile radius of 25 for single tile loading.");
+
+        tileDownloader = new TileDownloader(API_KEY, LNG_ORIGIN, LAT_ORIGIN, 25);
         initializeSessionDirectory();
         scheduleSessionCleanup();
         loadMaterialColors();
+        long end = System.currentTimeMillis();
+        System.out.println("[PERF] VoxelChunkGenerator constructor took " + (end - start) + " ms");
+    }
+
+    public void resetOriginForVisit(UUID playerUUID) {
+        playerOrigins.remove(playerUUID);
     }
 
     private void initializeSessionDirectory() {
@@ -94,7 +101,7 @@ public class VoxelChunkGenerator extends ChunkGenerator {
         if (!sessionDir.exists()) {
             sessionDir.mkdirs();
         }
-        System.out.println("[DEBUG] Session directory initialized at: " + sessionDir.getAbsolutePath());
+        // debug removed
     }
 
     private void scheduleSessionCleanup() {
@@ -106,16 +113,16 @@ public class VoxelChunkGenerator extends ChunkGenerator {
     }
 
     private void clearSessionDirectory() {
-        System.out.println("[Session Cleanup] Clearing session directory...");
+        // debug removed
         try {
             Files.walk(Paths.get(SESSION_DIR))
                     .filter(Files::isRegularFile)
                     .forEach(path -> {
                         try {
                             Files.delete(path);
-                            System.out.println("[Session Cleanup] Deleted: " + path);
+                            // debug removed
                         } catch (IOException e) {
-                            System.err.println("[Session Cleanup] Failed to delete: " + path);
+                            // debug removed
                         }
                     });
         } catch (IOException e) {
@@ -123,16 +130,13 @@ public class VoxelChunkGenerator extends ChunkGenerator {
         }
     }
 
-    public void regenChunks(World world, 
-                            double scaleX, double scaleY, double scaleZ, 
+    public void regenChunks(World world,
+                            double scaleX, double scaleY, double scaleZ,
                             double newOffsetX, double newOffsetY, double newOffsetZ) {
 
-        System.out.println("[DEBUG] regenChunks called with scaleX=" + scaleX + ", scaleY=" + scaleY + ", scaleZ=" + scaleZ);
-        System.out.println("[DEBUG] offsets: X=" + newOffsetX + ", Y=" + newOffsetY + ", Z=" + newOffsetZ);
-
+        long start = System.currentTimeMillis();
         indexedBlocks = new ConcurrentHashMap<>();
-        loadMaterialColors();
-        System.out.println("[DEBUG] MATERIAL_COLORS size: " + MATERIAL_COLORS.size());
+        loadMaterialColors(); // Might want to avoid reloading each time if not needed
 
         this.offsetX = newOffsetX;
         this.offsetY = newOffsetY;
@@ -141,9 +145,9 @@ public class VoxelChunkGenerator extends ChunkGenerator {
         this.scaleY = scaleY;
         this.scaleZ = scaleZ;
 
-        System.out.println("[DEBUG] Starting block removal and regeneration...");
         List<Chunk> chunksToProcess = new ArrayList<>();
 
+        // We remove the debug prints
         for (int chunkX = -20; chunkX <= 20; chunkX++) {
             for (int chunkZ = -20; chunkZ <= 20; chunkZ++) {
                 Chunk chunk = world.getChunkAt(chunkX, chunkZ);
@@ -153,23 +157,29 @@ public class VoxelChunkGenerator extends ChunkGenerator {
         }
 
         try {
+            long startDownload = System.currentTimeMillis();
             downloadAndProcessTiles(0, 0);
+            long endDownload = System.currentTimeMillis();
+            System.out.println("[PERF] downloadAndProcessTiles took " + (endDownload - startDownload) + " ms");
         } catch (Exception e) {
-            System.out.println("[DEBUG] Failed to load indexed JSON blocks.");
             e.printStackTrace();
         }
 
         processChunksInBatches(chunksToProcess, world);
+
+        long end = System.currentTimeMillis();
+        System.out.println("[PERF] regenChunks total took " + (end - start) + " ms");
     }
 
     private void processChunksInBatches(List<Chunk> chunks, World world) {
+        long start = System.currentTimeMillis();
         AtomicInteger currentIndex = new AtomicInteger(0);
-        int batchSize = 1;
 
         Bukkit.getScheduler().runTaskTimer(Bukkit.getPluginManager().getPlugin("VoxelEarth"), task -> {
             if (currentIndex.get() >= chunks.size()) {
-                System.out.println("[DEBUG] All chunks processed and blocks placed.");
                 task.cancel();
+                long end = System.currentTimeMillis();
+                System.out.println("[PERF] processChunksInBatches total took " + (end - start) + " ms");
                 return;
             }
 
@@ -209,10 +219,12 @@ public class VoxelChunkGenerator extends ChunkGenerator {
     }
 
     public void loadMaterialColors() {
-        System.out.println("[DEBUG] Loading material colors...");
-        try (InputStream is = getClass().getResourceAsStream("/vanilla.atlas")) {
+        // Optionally measure time for loading
+        long start = System.currentTimeMillis();
+        InputStream is = null;
+        try {
+            is = getClass().getResourceAsStream("/vanilla.atlas");
             if (is == null) {
-                System.out.println("[DEBUG] vanilla.atlas not found in resources.");
                 return;
             }
             JSONObject atlasJson = new JSONObject(new JSONTokener(is));
@@ -230,16 +242,21 @@ public class VoxelChunkGenerator extends ChunkGenerator {
                 int b = (int) (colourObject.getDouble("b") * 255);
 
                 MATERIAL_COLORS.add(new MaterialColor(material, new Color(r, g, b)));
-                System.out.printf("[DEBUG] Loaded material: %s with color: (%d, %d, %d)%n", material, r, g, b);
             }
-        } catch (IOException e) {
+        } catch (Exception e) {
             e.printStackTrace();
+        } finally {
+            if (is != null) {
+                try { is.close(); } catch (Exception ignored) {}
+            }
         }
+        long end = System.currentTimeMillis();
+        System.out.println("[PERF] loadMaterialColors took " + (end - start) + " ms");
     }
 
     private Material getMaterial(String blockName) {
         String formattedName = blockName.replace("minecraft:", "").toUpperCase()
-                                        .replace("_", " ").replace(" ", "_");
+                .replace("_", " ").replace(" ", "_");
 
         Material material = Material.matchMaterial(formattedName);
         if (material == null) {
@@ -248,7 +265,6 @@ public class VoxelChunkGenerator extends ChunkGenerator {
             } else if (formattedName.matches("FROSTED_ICE_\\d")) {
                 material = Material.ICE;
             } else {
-                System.out.printf("[DEBUG] Material not found for block: %s. Using STONE as fallback.%n", formattedName);
                 material = Material.STONE;
             }
         }
@@ -256,38 +272,31 @@ public class VoxelChunkGenerator extends ChunkGenerator {
     }
 
     private void downloadAndProcessTiles(int chunkX, int chunkZ) {
+        // Timed
+        long start = System.currentTimeMillis();
         try {
-            System.out.println("[DEBUG] Calling downloadTiles for single tile load at radius 25");
             String outputDirectory = SESSION_DIR;
-
-            System.out.println("[DEBUG] Set coordinates: lng=" + LNG_ORIGIN + ", lat=" + LAT_ORIGIN);
             tileDownloader.setCoordinates(LNG_ORIGIN, LAT_ORIGIN);
 
             List<String> downloadedTileFiles = tileDownloader.downloadTiles(outputDirectory);
-            System.out.println("[DEBUG] Downloaded tiles: " + downloadedTileFiles);
 
-            if (downloadedTileFiles.isEmpty()) {
-                System.out.println("[DEBUG] No new tiles were downloaded.");
-                return;
+            if (!downloadedTileFiles.isEmpty()) {
+                runGpuVoxelizer(outputDirectory, downloadedTileFiles);
+                loadIndexedJson(new File(outputDirectory), downloadedTileFiles, chunkX, chunkZ);
             }
-
-            System.out.println("[DEBUG] Running voxelizer on downloaded tiles...");
-            runGpuVoxelizer(outputDirectory, downloadedTileFiles);
-
-            System.out.println("[DEBUG] Loading indexed JSON...");
-            loadIndexedJson(new File(outputDirectory), downloadedTileFiles, chunkX, chunkZ);
         } catch (IOException | InterruptedException e) {
             e.printStackTrace();
         }
+        long end = System.currentTimeMillis();
+        System.out.println("[PERF] downloadAndProcessTiles took " + (end - start) + " ms");
     }
 
     private void runGpuVoxelizer(String directory, List<String> tileFiles) throws IOException, InterruptedException {
-        System.out.println("[DEBUG] runGpuVoxelizer started...");
-        int numThreads = Runtime.getRuntime().availableProcessors();
+        long start = System.currentTimeMillis();
+        int numThreads = Runtime.getRuntime().availableProcessors() * 3;
         ExecutorService executor = Executors.newFixedThreadPool(numThreads);
 
         List<Future<?>> futures = new ArrayList<>();
-
         for (String tileFileName : tileFiles) {
             Future<?> future = executor.submit(() -> {
                 try {
@@ -308,21 +317,20 @@ public class VoxelChunkGenerator extends ChunkGenerator {
         }
 
         executor.shutdown();
-        System.out.println("[DEBUG] runGpuVoxelizer completed.");
+        long end = System.currentTimeMillis();
+        System.out.println("[PERF] runGpuVoxelizer took " + (end - start) + " ms");
     }
 
     private void processVoxelizerFile(String directory, String tileFileName) throws IOException, InterruptedException {
+        long start = System.currentTimeMillis();
         File file = new File(directory, tileFileName);
         String baseName = file.getName();
         String outputJson = baseName + "_128.json";
         File outputFile = new File(directory, outputJson);
 
         if (outputFile.exists()) {
-            System.out.println("[DEBUG] Skipping voxelization, " + outputJson + " already exists.");
-            return;
+            return; // skip
         }
-
-        System.out.println("[DEBUG] Running voxelizer on " + file.getName());
 
         ProcessBuilder processBuilder = new ProcessBuilder(
                 "./cuda_voxelizer",
@@ -342,7 +350,8 @@ public class VoxelChunkGenerator extends ChunkGenerator {
             throw new RuntimeException("Voxelizer process failed with exit code " + exitCode);
         }
 
-        System.out.println("[DEBUG] Voxelization completed: " + outputJson);
+        long end = System.currentTimeMillis();
+        System.out.println("[PERF] processVoxelizerFile(" + tileFileName + ") took " + (end - start) + " ms");
     }
 
     private static final double MAX_COLOR_DISTANCE = 30.0;
@@ -373,21 +382,13 @@ public class VoxelChunkGenerator extends ChunkGenerator {
         if (bestMatch != null && minDeltaE <= 10.0) {
             return bestMatch.getMaterial();
         } else {
-            System.out.printf("[DEBUG] No suitable match for color (%d, %d, %d). Using STONE%n", r, g, b);
             return Material.STONE;
         }
     }
 
-    private double colorDistance(Color c1, Color c2) {
-        int dr = c1.getRed() - c2.getRed();
-        int dg = c1.getGreen() - c2.getGreen();
-        int db = c1.getBlue() - c2.getBlue();
-        return Math.sqrt(dr * dr + dg * dg + db * db);
-    }
-
     private void loadIndexedJson(File directory, List<String> tileFiles, int chunkX, int chunkZ) throws IOException {
-        System.out.println("[DEBUG] loadIndexedJson called. Loading tiles into memory.");
-        int numThreads = Runtime.getRuntime().availableProcessors();
+        long start = System.currentTimeMillis();
+        int numThreads = Runtime.getRuntime().availableProcessors() * 3;
         ExecutorService executor = Executors.newFixedThreadPool(numThreads);
 
         List<Future<?>> futures = new ArrayList<>();
@@ -404,7 +405,6 @@ public class VoxelChunkGenerator extends ChunkGenerator {
                 try {
                     processJsonFile(jsonFile, baseName, chunkX, chunkZ);
                 } catch (Exception e) {
-                    System.out.println("[DEBUG] Error loading JSON file: " + jsonFile.getName());
                     e.printStackTrace();
                 }
             });
@@ -420,42 +420,51 @@ public class VoxelChunkGenerator extends ChunkGenerator {
         }
 
         executor.shutdown();
-        System.out.println("[DEBUG] Finished loadIndexedJson.");
+        long end = System.currentTimeMillis();
+        System.out.println("[PERF] loadIndexedJson took " + (end - start) + " ms");
     }
 
     private void processJsonFile(File jsonFile, String baseName, int chunkX, int chunkZ) throws IOException {
-        System.out.println("[DEBUG] processJsonFile: " + jsonFile.getName());
+        long start = System.currentTimeMillis();
         try (FileReader reader = new FileReader(jsonFile)) {
             JSONObject json = new JSONObject(new JSONTokener(reader));
 
-            File positionFile = new File(jsonFile.getParent(), baseName.replaceFirst("\\.glb.*$", "") + "_position.json");
+            // File positionFile = new File(jsonFile.getParent(), baseName.replaceFirst("\\.glb.*$", "") + "_position.json");
+            // double[] tileTranslation = new double[3];
+            // if (positionFile.exists()) {
+            //     try (FileReader posReader = new FileReader(positionFile)) {
+            //         JSONArray positionArray = new JSONArray(new JSONTokener(posReader));
+            //         if (positionArray.length() > 0) {
+            //             JSONObject positionData = positionArray.getJSONObject(0);
+            //             JSONArray translationArray = positionData.getJSONArray("translation");
+
+            //             double rawX = translationArray.getDouble(0);
+            //             double rawY = translationArray.getDouble(1);
+            //             double rawZ = translationArray.getDouble(2);
+
+            //             tileTranslation[0] = (rawX * scaleX) + offsetX + (chunkX * 16);
+            //             tileTranslation[1] = (rawY * scaleY) + offsetY;
+            //             tileTranslation[2] = (rawZ * scaleZ) + offsetZ + (chunkZ * 16);
+            //         }
+            //     }
+            // }
+
+            Map<String, double[]> tileTranslations = tileDownloader.getTileTranslations();
             double[] tileTranslation = new double[3];
-            if (positionFile.exists()) {
-                try (FileReader posReader = new FileReader(positionFile)) {
-                    JSONArray positionArray = new JSONArray(new JSONTokener(posReader));
-                    if (positionArray.length() > 0) {
-                        JSONObject positionData = positionArray.getJSONObject(0);
-                        JSONArray translationArray = positionData.getJSONArray("translation");
+            if (tileTranslations != null) {
+                double[] translation = tileTranslations.get(baseName);
+                if (translation != null) {
+                    double rawX = translation[0];
+                    double rawY = translation[1];
+                    double rawZ = translation[2];
 
-                        double rawX = translationArray.getDouble(0);
-                        double rawY = translationArray.getDouble(1);
-                        double rawZ = translationArray.getDouble(2);
-
-                        tileTranslation[0] = (rawX * scaleX) + offsetX + (chunkX * 16);
-                        tileTranslation[1] = (rawY * scaleY) + offsetY;
-                        tileTranslation[2] = (rawZ * scaleZ) + offsetZ + (chunkZ * 16);
-
-                        System.out.println("[DEBUG] positionFile: " + positionFile.getName());
-                        System.out.println("[DEBUG] Raw translation: (" + rawX + ", " + rawY + ", " + rawZ + ")");
-                        System.out.println("[DEBUG] Computed tileTranslation: (" + tileTranslation[0] + ", " + tileTranslation[1] + ", " + tileTranslation[2] + ")");
-                    }
+                    tileTranslation[0] = (rawX * scaleX) + offsetX + (chunkX * 16);
+                    tileTranslation[1] = (rawY * scaleY) + offsetY;
+                    tileTranslation[2] = (rawZ * scaleZ) + offsetZ + (chunkZ * 16);
                 }
-            } else {
-                System.out.println("[DEBUG] No position file for: " + baseName);
             }
 
             if (!json.has("blocks") || !json.has("xyzi")) {
-                System.out.println("[DEBUG] JSON missing 'blocks' or 'xyzi' for " + baseName);
                 return;
             }
 
@@ -508,37 +517,33 @@ public class VoxelChunkGenerator extends ChunkGenerator {
             indexMap.put("blocks", blockMap);
 
             indexedBlocks.putIfAbsent(baseName, indexMap);
-
-            System.out.println("[DEBUG] Loaded tile: " + baseName + " with " + blockMap.size() + " blocks.");
-            System.out.println("[DEBUG] Block bounding box for " + baseName + ": X[" + minX + "," + maxX + "] Y[" + minY + "," + maxY + "] Z[" + minZ + "," + maxZ + "]");
         }
+        long end = System.currentTimeMillis();
+        System.out.println("[PERF] processJsonFile(" + jsonFile.getName() + ") took " + (end - start) + " ms");
     }
 
     public void loadJson(String filename, double scaleX, double scaleY, double scaleZ, double offsetX, double offsetY, double offsetZ) throws IOException {
+        long start = System.currentTimeMillis();
+
         File file = new File(filename);
         if (!file.exists()) {
-            System.out.println("[DEBUG] File " + filename + " does not exist.");
             return;
         }
-
         indexedBlocks = new ConcurrentHashMap<>();
 
         String baseName = file.getName().replace(".json", "");
         try (FileReader reader = new FileReader(file)) {
             JSONObject json = new JSONObject(new JSONTokener(reader));
 
-            double[] tileTranslation = new double[3];
-
             if (!json.has("blocks") || !json.has("xyzi")) {
-                System.out.println("[DEBUG] JSON file " + filename + " missing 'blocks' or 'xyzi'.");
                 return;
             }
 
             JSONObject blocksObject = json.getJSONObject("blocks");
             JSONArray xyziArray = json.getJSONArray("xyzi");
             Map<String, Material> blockMap = new HashMap<>();
-
             Map<Integer, Material> colorIndexToMaterial = new HashMap<>();
+
             Iterator<String> keys = blocksObject.keys();
             while (keys.hasNext()) {
                 String key = keys.next();
@@ -575,9 +580,6 @@ public class VoxelChunkGenerator extends ChunkGenerator {
             indexedBlocks.put(baseName, indexMap);
 
             Bukkit.getScheduler().runTask(Bukkit.getPluginManager().getPlugin("VoxelEarth"), () -> {
-                System.out.println("[DEBUG] Starting chunk regeneration after loadJson...");
-                System.out.println("[DEBUG] IndexedBlocks length: " + indexedBlocks.size());
-
                 for (ConcurrentHashMap.Entry<String, Map<String, Object>> tileEntry : indexedBlocks.entrySet()) {
                     Map<String, Object> indexMap1 = tileEntry.getValue();
 
@@ -603,7 +605,6 @@ public class VoxelChunkGenerator extends ChunkGenerator {
 
                         World world = Bukkit.getWorld("world");
                         if (world == null) {
-                            System.out.println("[DEBUG] World not found in loadJson placement.");
                             continue;
                         }
 
@@ -616,17 +617,16 @@ public class VoxelChunkGenerator extends ChunkGenerator {
                         int localZ = newZ & 15;
 
                         BlockChanger.setSectionBlockAsynchronously(
-                            chunk.getBlock(localX, newY, localZ).getLocation(),
-                            new ItemStack(blockEntry.getValue()),
-                            false
+                                chunk.getBlock(localX, newY, localZ).getLocation(),
+                                new ItemStack(blockEntry.getValue()),
+                                false
                         );
                     }
                 }
-                System.out.println("[DEBUG] JSON generated.");
             });
-
-            System.out.println("[DEBUG] Loaded JSON file: " + filename);
         }
+        long end = System.currentTimeMillis();
+        System.out.println("[PERF] loadJson() total took " + (end - start) + " ms");
     }
 
     @Override
@@ -636,51 +636,50 @@ public class VoxelChunkGenerator extends ChunkGenerator {
 
     public void loadChunk(UUID playerUUID, int tileX, int tileZ, boolean isVisit, Consumer<int[]> callback) {
         Bukkit.getScheduler().runTaskAsynchronously(Bukkit.getPluginManager().getPlugin("VoxelEarth"), () -> {
+            long start = System.currentTimeMillis();
             try {
-                File originTranslationFile = new File("origin_translation.json");
-                if (originTranslationFile.exists()) {
-                    try (FileReader reader = new FileReader(originTranslationFile)) {
-                        JSONArray originArray = new JSONArray(new JSONTokener(reader));
-                        originEcef = new double[3];
-                        originEcef[0] = originArray.getDouble(0);
-                        originEcef[1] = -originArray.getDouble(2);
-                        originEcef[2] = originArray.getDouble(1);
-                        System.out.println("[DEBUG] Adjusted origin ECEF: " + Arrays.toString(originEcef));
-                    }
-                } else {
-                    System.out.println("[DEBUG] origin_translation.json not found, originEcef may not be set.");
+                // File originTranslationFile = new File("origin_translation.json");
+                // if (originTranslationFile.exists()) {
+                //     try (FileReader reader = new FileReader(originTranslationFile)) {
+                //         JSONArray originArray = new JSONArray(new JSONTokener(reader));
+                //         originEcef = new double[3];
+                //         originEcef[0] = originArray.getDouble(0);
+                //         originEcef[1] = -originArray.getDouble(2);
+                //         originEcef[2] = originArray.getDouble(1);
+                //     }
+                // }
+
+                // Get origin from TileDownloadear and set to originEcef
+                double[] origin = tileDownloader.getOrigin();
+                if (origin != null) {
+                    originEcef = new double[3];
+                    originEcef[0] = origin[0];
+                    originEcef[1] = -origin[2];
+                    originEcef[2] = origin[1];
                 }
 
-                double[] playerOrigin = playerOrigins.get(playerUUID);
-                if (playerOrigin != null) {
-                    tileDownloader.setOrigin(playerOrigin);
-                    System.out.println("[DEBUG] Using player's stored origin: " + Arrays.toString(playerOrigin));
-                } else {
-                    tileDownloader.setOrigin(null);
-                    System.out.println("[DEBUG] No player-specific origin, using global origin.");
-                }
+                // double[] playerOrigin = playerOrigins.get(playerUUID);
+                // if (playerOrigin != null) {
+                //     tileDownloader.setOrigin(playerOrigin);
+                // } else {
+                //     tileDownloader.setOrigin(null);
+                // }
 
                 int[] blockLocation = new int[]{210, 70, 0};
 
                 String outputDirectory = SESSION_DIR;
 
                 double[] latLng = minecraftToLatLng(tileX, tileZ);
-                System.out.println("[DEBUG] loadChunk: tileX=" + tileX + ", tileZ=" + tileZ + " -> lat/lng=" + latLng[0] + "," + latLng[1]);
 
                 tileDownloader.setCoordinates(latLng[1], latLng[0]);
                 tileDownloader.setRadius(25);
 
-                System.out.println("[DEBUG] Downloading single tile at lat=" + latLng[0] + ", lng=" + latLng[1] + " with radius 25");
                 List<String> downloadedTileFiles = tileDownloader.downloadTiles(outputDirectory);
-                System.out.println("[DEBUG] Downloaded tile files: " + downloadedTileFiles);
-
                 if (downloadedTileFiles.isEmpty()) {
-                    System.out.println("[DEBUG] No tiles downloaded.");
                     callback.accept(blockLocation);
                     return;
                 }
 
-                System.out.println("[DEBUG] Running voxelizer for single tile...");
                 runGpuVoxelizer(outputDirectory, downloadedTileFiles);
 
                 Set<String> previousKeys = new HashSet<>(indexedBlocks.keySet());
@@ -691,13 +690,11 @@ public class VoxelChunkGenerator extends ChunkGenerator {
                 if (isVisit) {
                     playerXOffsets.put(playerUUID, tileX);
                     playerZOffsets.put(playerUUID, tileZ);
-                    System.out.println("[DEBUG] Visit mode: storing offsets tileX=" + tileX + ", tileZ=" + tileZ);
                 } else {
                     Integer storedXOffset = playerXOffsets.get(playerUUID);
                     Integer storedZOffset = playerZOffsets.get(playerUUID);
                     if (storedXOffset != null) adjustedTileX = storedXOffset;
                     if (storedZOffset != null) adjustedTileZ = storedZOffset;
-                    System.out.println("[DEBUG] Non-visit mode: using stored offsets adjustedTileX=" + adjustedTileX + ", adjustedTileZ=" + adjustedTileZ);
                 }
 
                 loadIndexedJson(new File(outputDirectory), downloadedTileFiles, adjustedTileX, adjustedTileZ);
@@ -710,22 +707,15 @@ public class VoxelChunkGenerator extends ChunkGenerator {
                 } else if (!indexedBlocks.isEmpty()) {
                     initialTileKey = indexedBlocks.keySet().iterator().next();
                 } else {
-                    System.out.println("[DEBUG] No tiles loaded, cannot compute block location.");
                     callback.accept(blockLocation);
                     return;
                 }
 
-                System.out.println("[DEBUG] Initial tile key: " + initialTileKey);
-
-                final AtomicInteger yOffset = new AtomicInteger(0);
+                AtomicInteger yOffset = new AtomicInteger(0);
                 final int desiredY = 70;
-
-                System.out.println("[DEBUG] Starting chunk regeneration...");
-                System.out.println("[DEBUG] IndexedBlocks size: " + indexedBlocks.size());
 
                 World world = Bukkit.getWorld("world");
                 if (world == null) {
-                    System.out.println("[DEBUG] World 'world' not found!");
                     callback.accept(blockLocation);
                     return;
                 }
@@ -740,27 +730,31 @@ public class VoxelChunkGenerator extends ChunkGenerator {
                             .orElse(0);
 
                     yOffset.set(desiredY - minYInTile);
-                    System.out.println("[DEBUG] Computed yOffset: " + yOffset.get());
 
                     if (isVisit) {
-                        String positionFileName = initialTileKey.replaceFirst("\\.glb.*$", "") + "_position.json";
-                        File positionFile = new File(outputDirectory, positionFileName);
-                        if (positionFile.exists()) {
-                            try (FileReader posReader = new FileReader(positionFile)) {
-                                JSONArray positionArray = new JSONArray(new JSONTokener(posReader));
-                                if (positionArray.length() > 0) {
-                                    JSONObject positionData = positionArray.getJSONObject(0);
-                                    JSONArray originArray = positionData.getJSONArray("origin");
-                                    double[] origin = new double[3];
-                                    origin[0] = originArray.getDouble(0);
-                                    origin[1] = originArray.getDouble(1);
-                                    origin[2] = originArray.getDouble(2);
-                                    playerOrigins.put(playerUUID, origin);
-                                    System.out.println("[DEBUG] Storing player origin: " + Arrays.toString(origin));
-                                }
-                            } catch (Exception e) {
-                                System.out.println("[DEBUG] Error reading position file for origin:");
-                                e.printStackTrace();
+                        // String positionFileName = initialTileKey.replaceFirst("\\.glb.*$", "") + "_position.json";
+                        // File positionFile = new File(outputDirectory, positionFileName);
+                        // if (positionFile.exists()) {
+                        //     try (FileReader posReader = new FileReader(positionFile)) {
+                        //         JSONArray positionArray = new JSONArray(new JSONTokener(posReader));
+                        //         if (positionArray.length() > 0) {
+                        //             JSONObject positionData = positionArray.getJSONObject(0);
+                        //             JSONArray originArray = positionData.getJSONArray("origin");
+                        //             double[] origin = new double[3];
+                        //             origin[0] = originArray.getDouble(0);
+                        //             origin[1] = originArray.getDouble(1);
+                        //             origin[2] = originArray.getDouble(2);
+                        //             playerOrigins.put(playerUUID, origin);
+                        //         }
+                        //     } catch (Exception e) {
+                        //         e.printStackTrace();
+                        //     }
+                        // }
+                        Map<String, double[]> tileTranslations = tileDownloader.getTileTranslations();
+                        if (tileTranslations != null) {
+                            double[] translation = tileTranslations.get(initialTileKey);
+                            if (translation != null) {
+                                playerOrigins.put(playerUUID, new double[]{translation[0], translation[2], translation[1]});
                             }
                         }
 
@@ -769,12 +763,10 @@ public class VoxelChunkGenerator extends ChunkGenerator {
                         Integer storedYOffset = playerYOffsets.get(playerUUID);
                         if (storedYOffset != null) {
                             yOffset.set(storedYOffset);
-                            System.out.println("[DEBUG] Using stored yOffset: " + yOffset.get());
                         }
                     }
 
                     if (!(boolean) indexMap1.get("isPlaced")) {
-                        System.out.println("[DEBUG] Placing blocks for initial tile...");
                         placeBlocks(world, blockMap1, yOffset.get());
                         indexMap1.put("isPlaced", true);
                     }
@@ -785,35 +777,31 @@ public class VoxelChunkGenerator extends ChunkGenerator {
                         blockLocation[0] = Integer.parseInt(coords[0]);
                         blockLocation[1] = Integer.parseInt(coords[1]) + yOffset.get();
                         blockLocation[2] = Integer.parseInt(coords[2]);
-
-                        System.out.println("[DEBUG] First block location: " + Arrays.toString(blockLocation));
                     }
                 }
 
                 final String finalInitialTileKey = initialTileKey;
-
                 indexedBlocks.forEach((tileKey, indexMap) -> {
                     if (!tileKey.equals(finalInitialTileKey) && indexMap != null && !(boolean) indexMap.get("isPlaced")) {
                         Map<String, Material> blockMap = (Map<String, Material>) indexMap.get("blocks");
-                        System.out.println("[DEBUG] Placing blocks for secondary tile: " + tileKey);
                         placeBlocks(world, blockMap, yOffset.get());
                         indexMap.put("isPlaced", true);
                     }
-                });                
+                });
 
-                System.out.println("[DEBUG] Chunk regeneration completed.");
                 callback.accept(blockLocation);
-
             } catch (IOException | InterruptedException e) {
-                System.out.println("[DEBUG] Exception in loadChunk:");
                 e.printStackTrace();
                 int[] blockLocation = new int[]{210, 70, 0};
                 callback.accept(blockLocation);
             }
+            long end = System.currentTimeMillis();
+            System.out.println("[PERF] loadChunk() total took " + (end - start) + " ms");
         });
     }
 
     private void placeBlocks(World world, Map<String, Material> blockMap, int yOffset) {
+        long start = System.currentTimeMillis();
         Set<Chunk> modifiedChunks = ConcurrentHashMap.newKeySet();
 
         for (Map.Entry<String, Material> blockEntry : blockMap.entrySet()) {
@@ -834,7 +822,6 @@ public class VoxelChunkGenerator extends ChunkGenerator {
             }
 
             if (newY < world.getMinHeight() || newY >= world.getMaxHeight()) {
-                System.out.println("[DEBUG] Skipping block at " + newX + "," + newY + "," + newZ + " Y out of bounds.");
                 continue;
             }
 
@@ -858,148 +845,104 @@ public class VoxelChunkGenerator extends ChunkGenerator {
                 false
             );
 
-            // System.out.println("[DEBUG] Set block at " + newX + "," + newY + "," + newZ + " in chunk (" + blockChunkX + "," + blockChunkZ + ") mat: " + material);
-            
-            // Get the chunk that corresponds to the block's real chunk coordinates
             Block pos = world.getBlockAt(newX, newY, newZ);
             Chunk realChunk = pos.getChunk();
-
             modifiedChunks.add(realChunk);
         }
 
         updateLighting(world, modifiedChunks);
+        long end = System.currentTimeMillis();
+        System.out.println("[PERF] placeBlocks() took " + (end - start) + " ms for " + blockMap.size() + " blocks");
     }
 
     private void updateLighting(World world, Set<Chunk> modifiedChunks) {
-        System.out.println("[DEBUG] Updating lighting for modified chunks...");
+        long start = System.currentTimeMillis();
         for (Chunk chunk : modifiedChunks) {
             int chunkX = chunk.getX();
             int chunkZ = chunk.getZ();
             world.refreshChunk(chunkX, chunkZ);
         }
+        long end = System.currentTimeMillis();
+        System.out.println("[PERF] updateLighting() took " + (end - start) + " ms for " + modifiedChunks.size() + " chunks");
     }
 
-    private static final double EARTH_RADIUS = 6378137.0;  
-    private static final int CHUNK_SIZE = 16;  
-
-    // private double[] latLngToMeters(double lat, double lng) {
-    //     double x = lng * (Math.PI / 180) * EARTH_RADIUS;
-    //     double z = Math.log(Math.tan((Math.PI / 4) + Math.toRadians(lat) / 2)) * EARTH_RADIUS;
-    //     return new double[]{x, z};
-    // }
+    private static final double EARTH_RADIUS = 6378137.0;
+    private static final int CHUNK_SIZE = 16;
 
     int oldOffsetXX = 7677201 - 7677296; // -95
     int oldOffsetZZ = -11936601 - (-11937070); // 468
 
-    // int newOffsetXX = oldOffsetXX * 5;
-    // int newOffsetZZ = oldOffsetZZ * 5;
-    
-// Decide on final constants:
-// metersPerBlock = 2.1
-// metersPerChunk = 2.1 * 16 = 33.6
-// Suppose old offsets were chosen for the old scale; now multiply them by 5 to compensate.
-int newOffsetXX = oldOffsetXX * 5;
-int newOffsetZZ = oldOffsetZZ * 5;
+    int newOffsetXX = oldOffsetXX * 5;
+    int newOffsetZZ = oldOffsetZZ * 5;
 
-public double getPlayerLatitude(UUID playerUUID) {
-    // Get the player's current position
-    Player player = Bukkit.getPlayer(playerUUID);
-    if (player == null) {
-        return 0.0;  // If player is not online, return a default value (handle this case)
+    public double getPlayerLatitude(UUID playerUUID) {
+        Player player = Bukkit.getPlayer(playerUUID);
+        if (player == null) {
+            return 0.0;
+        }
+        double x = player.getLocation().getX();
+        double z = player.getLocation().getZ();
+        double[] latLng = minecraftToLatLng((int) x, (int) z);
+        return latLng[0];
     }
 
-    // Convert the player's Minecraft X and Z position to latitude/longitude
-    double x = player.getLocation().getX();
-    double z = player.getLocation().getZ();
-
-    // Convert Minecraft coordinates to lat/lng using your existing conversion
-    double[] latLng = minecraftToLatLng((int) x, (int) z);
-
-    // Return the latitude from the conversion
-    return latLng[0];  // latLng[0] contains the latitude
-}
-
-public double getPlayerLongitude(UUID playerUUID) {
-    // Get the player's current position
-    Player player = Bukkit.getPlayer(playerUUID);
-    if (player == null) {
-        return 0.0;  // If player is not online, return a default value (handle this case)
+    public double getPlayerLongitude(UUID playerUUID) {
+        Player player = Bukkit.getPlayer(playerUUID);
+        if (player == null) {
+            return 0.0;
+        }
+        double x = player.getLocation().getX();
+        double z = player.getLocation().getZ();
+        double[] latLng = minecraftToLatLng((int) x, (int) z);
+        return latLng[1];
     }
 
-    // Convert the player's Minecraft X and Z position to latitude/longitude
-    double x = player.getLocation().getX();
-    double z = player.getLocation().getZ();
+    public void updateOffsetsForLocation(UUID playerUUID) {
+        double latitude = getPlayerLatitude(playerUUID);
+        double longitude = getPlayerLongitude(playerUUID);
 
-    // Convert Minecraft coordinates to lat/lng using your existing conversion method
-    double[] latLng = minecraftToLatLng((int) x, (int) z);
+        int signAdjustmentX = (longitude >= 0) ? 1 : -1;
+        int signAdjustmentZ = (latitude >= 0) ? 1 : -1;
 
-    // Return the longitude from the conversion (latLng[1] contains the longitude)
-    return latLng[1];  // latLng[1] is the longitude
-}
+        newOffsetXX = (int) (oldOffsetXX * signAdjustmentX);
+        newOffsetZZ = (int) (oldOffsetZZ * signAdjustmentZ);
+    }
 
+    public double[] minecraftToLatLng(int chunkX, int chunkZ) {
+        double metersPerChunk = CHUNK_SIZE * (metersPerBlock / 2.625);
+        double metersZ = (chunkX * metersPerChunk + newOffsetXX);
+        double metersX = ((chunkZ * metersPerChunk + newOffsetZZ));
 
-public void updateOffsetsForLocation(UUID playerUUID) {
-    // Get the player's current latitude and longitude from their Minecraft position (or calculate it based on their X/Z)
-    double latitude = getPlayerLatitude(playerUUID);
-    double longitude = getPlayerLongitude(playerUUID);  // A similar function to get longitude if needed
+        metersX = -metersX;
+        metersZ = -metersZ;
 
-    // Apply dynamic sign flipping based on player's location (especially longitude and latitude)
-    int signAdjustmentX = (longitude >= 0) ? 1 : -1;  // +1 for East, -1 for West
-    int signAdjustmentZ = (latitude >= 0) ? 1 : -1;   // +1 for North, -1 for South
+        double lng = (metersX / EARTH_RADIUS) * (180 / Math.PI);
+        double lat = (2 * Math.atan(Math.exp(metersZ / EARTH_RADIUS)) - Math.PI / 2) * (180 / Math.PI);
 
-    // Adjust the offsets for the X and Z coordinates based on the player's location
-    newOffsetXX = (int) (oldOffsetXX * signAdjustmentX);
-    newOffsetZZ = (int) (oldOffsetZZ * signAdjustmentZ);
+        return new double[]{lat, lng};
+    }
 
-    // Debug: Print out the adjusted offsets for verification
-    System.out.println("Updated Offsets for Player " + playerUUID + ": X=" + newOffsetXX + ", Z=" + newOffsetZZ);
-}
+    public int[] latLngToMinecraft(double lat, double lng) {
+        double[] meters = latLngToMeters(lat, lng);
+        double metersPerChunk = CHUNK_SIZE * (metersPerBlock / 2.625);
 
+        double metersZ = meters[0];
+        double metersX = meters[1];
 
+        metersX = -metersX;
+        metersZ = -metersZ;
 
-// Try removing 1.00037 and 0.99999. If you must keep them, ensure they are used in both directions consistently.
+        int chunkX = (int)((metersX - newOffsetXX) / metersPerChunk);
+        int chunkZ = (int)((metersZ - newOffsetZZ) / metersPerChunk);
 
-public double[] minecraftToLatLng(int chunkX, int chunkZ) {
-    double metersPerChunk = CHUNK_SIZE * (metersPerBlock / 2.625); // 14 meters per chunk.
+        return new int[]{chunkX, chunkZ};
+    }
 
-    // Convert chunk coords to meters
-    double metersZ = (chunkX * metersPerChunk + newOffsetXX);
-    double metersX = ((chunkZ * metersPerChunk + newOffsetZZ)); // Removed the negative
-
-    // Invert metersX and metersZ to reverse the signs
-    metersX = -metersX;
-    metersZ = -metersZ;
-
-    // Now convert metersX, metersZ (Web Mercator) back to lat/lng
-    double lng = (metersX / EARTH_RADIUS) * (180 / Math.PI);
-    double lat = (2 * Math.atan(Math.exp(metersZ / EARTH_RADIUS)) - Math.PI / 2) * (180 / Math.PI);
-
-    return new double[]{lat, lng};
-}
-
-public int[] latLngToMinecraft(double lat, double lng) {
-    double[] meters = latLngToMeters(lat, lng);
-    double metersPerChunk = CHUNK_SIZE * (metersPerBlock / 2.625); // 14 meters per chunk.
-
-    double metersZ = meters[0];
-    double metersX = meters[1];
-
-    // Invert metersX and metersZ to reverse the signs
-    metersX = -metersX;
-    metersZ = -metersZ;
-
-    int chunkX = (int)((metersX - newOffsetXX) / metersPerChunk);
-    int chunkZ = (int)((metersZ - newOffsetZZ) / metersPerChunk); // Removed the negation from here as well
-
-    return new int[]{chunkX, chunkZ};
-}
-
-private double[] latLngToMeters(double lat, double lng) {
-    double x = lng * (Math.PI / 180) * EARTH_RADIUS;
-    double z = Math.log(Math.tan((Math.PI / 4) + Math.toRadians(lat) / 2)) * EARTH_RADIUS;
-    return new double[]{x, z};
-}
-
+    private double[] latLngToMeters(double lat, double lng) {
+        double x = lng * (Math.PI / 180) * EARTH_RADIUS;
+        double z = Math.log(Math.tan((Math.PI / 4) + Math.toRadians(lat) / 2)) * EARTH_RADIUS;
+        return new double[]{x, z};
+    }
 
     private double sinLat0, cosLat0, sinLon0, cosLon0;
 
@@ -1009,21 +952,26 @@ private double[] latLngToMeters(double lat, double lng) {
     private static final double eSq = (a * a - b * b) / (a * a); 
     private static final double eSqPrime = (a * a - b * b) / (b * b); 
 
-    private double[] enuToEcef(double east, double north, double up) {
-        double sinLat0 = Math.sin(Math.toRadians(LAT_ORIGIN));
-        double cosLat0 = Math.cos(Math.toRadians(LAT_ORIGIN));
-        double sinLon0 = Math.sin(Math.toRadians(LNG_ORIGIN));
-        double cosLon0 = Math.cos(Math.toRadians(LNG_ORIGIN));
+    public int[] latLngToBlock(double lat, double lng) {
+        if(originEcef == null) {
+            System.out.println("[DEBUG] Origin ECEF not set.");
+            return new int[]{0, 0};
+        }
 
-        double xEast = -sinLon0 * east - sinLat0 * cosLon0 * north + cosLat0 * cosLon0 * up;
-        double yNorth = cosLon0 * east - sinLat0 * sinLon0 * north + cosLat0 * sinLon0 * up;
-        double zUp = cosLat0 * north + sinLat0 * up;
+        double lat0Rad = Math.toRadians(LAT_ORIGIN);
+        double lon0Rad = Math.toRadians(LNG_ORIGIN);
+        sinLat0 = Math.sin(lat0Rad);
+        cosLat0 = Math.cos(lat0Rad);
+        sinLon0 = Math.sin(lon0Rad);
+        cosLon0 = Math.cos(lon0Rad);
 
-        double xEcef = xEast + originEcef[0];
-        double yEcef = yNorth + originEcef[1];
-        double zEcef = zUp + originEcef[2];
+        double[] ecef = latLngToEcef(lat, lng);
+        double[] enu = ecefToEnu(ecef[0], ecef[1], ecef[2]);
 
-        return new double[]{xEcef, yEcef, zEcef};
+        int x = (int) enu[0];
+        int z = (int) enu[1];
+
+        return new int[]{x, z};
     }
 
     private double[] ecefToLatLng(double x, double y, double z) {
@@ -1076,48 +1024,7 @@ private double[] latLngToMeters(double lat, double lng) {
         return new double[]{east, north, up};
     }
 
-    public double[] blockToLatLng(double x, double z) {
-        if(originEcef == null) {
-            System.out.println("[DEBUG] Block Origin ECEF not set.");
-            return new double[]{210, 70, 0};
-        }
-
-        double lat0Rad = Math.toRadians(LAT_ORIGIN);
-        double lon0Rad = Math.toRadians(LNG_ORIGIN);
-        sinLat0 = Math.sin(lat0Rad);
-        cosLat0 = Math.cos(lat0Rad);
-        sinLon0 = Math.sin(lon0Rad);
-        cosLon0 = Math.cos(lon0Rad);
-
-        double east = x * metersPerBlock;
-        double north = -z * metersPerBlock;
-        double up = 0;
-
-        double[] ecef = enuToEcef(east, north, up);
-        return ecefToLatLng(ecef[0], ecef[1], ecef[2]);
-    }
-
-    public int[] latLngToBlock(double lat, double lng) {
-        if(originEcef == null) {
-            System.out.println("[DEBUG] Origin ECEF not set.");
-            return new int[]{0, 0};
-        }
-
-        double lat0Rad = Math.toRadians(LAT_ORIGIN);
-        double lon0Rad = Math.toRadians(LNG_ORIGIN);
-        sinLat0 = Math.sin(lat0Rad);
-        cosLat0 = Math.cos(lat0Rad);
-        sinLon0 = Math.sin(lon0Rad);
-        cosLon0 = Math.cos(lon0Rad);
-
-        double[] ecef = latLngToEcef(lat, lng);
-        double[] enu = ecefToEnu(ecef[0], ecef[1], ecef[2]);
-
-        int x = (int) enu[0];
-        int z = (int) enu[1];
-
-        return new int[]{x, z};
-    }
+    // ECEF/ENU omitted debug
 
     @Override
     public boolean shouldGenerateNoise() { return false; }
