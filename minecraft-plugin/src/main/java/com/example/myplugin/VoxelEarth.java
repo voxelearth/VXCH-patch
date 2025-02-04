@@ -259,11 +259,13 @@ private void teleportAndLoadChunk(Player player, World world, int x, int z, int 
         // voxelChunkGenerator.loadChunk(chunkX, chunkZ);
         voxelChunkGenerator.loadChunk(player.getUniqueId(), chunkX, chunkZ, true, (blockLocation) -> {
             Bukkit.getScheduler().runTask(this, () -> {
+                blockLocation[1] += 50;
                 System.out.println("Block location: " + blockLocation[0] + ", " + blockLocation[1]);
                 Location location = new Location(world, blockLocation[0], blockLocation[1], blockLocation[2]);
                 player.sendMessage("You are now at: " + blockLocation[0] + ", " + blockLocation[1] + ", " + blockLocation[2]);
                 player.teleport(location);
                 player.sendMessage("Welcome to your destination!");
+                Bukkit.dispatchCommand(player, "paper fixlight 32");
                 getLogger().info("Teleported player to: " + blockLocation[0] + ", " + blockLocation[1] + ", " + blockLocation[2]);
             });
         });

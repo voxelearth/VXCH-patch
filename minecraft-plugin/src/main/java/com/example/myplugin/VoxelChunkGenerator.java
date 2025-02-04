@@ -39,6 +39,15 @@ import org.bukkit.Material;
 import java.util.UUID;
 import org.bukkit.entity.Player;
 
+// VXCH binary format
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
+
+// location
+import org.bukkit.Location;
+
 /**
  * A profiled version of VoxelChunkGenerator that times major operations
  * to identify performance bottlenecks.
@@ -89,11 +98,12 @@ public class VoxelChunkGenerator extends ChunkGenerator {
         scheduleSessionCleanup();
         loadMaterialColors();
         long end = System.currentTimeMillis();
-        System.out.println("[PERF] VoxelChunkGenerator constructor took " + (end - start) + " ms");
+        // System.out.println("[PERF] VoxelChunkGenerator constructor took " + (end - start) + " ms");
     }
 
     public void resetOriginForVisit(UUID playerUUID) {
         playerOrigins.remove(playerUUID);
+        tileDownloader.setOrigin(null);
     }
 
     private void initializeSessionDirectory() {
@@ -160,7 +170,7 @@ public class VoxelChunkGenerator extends ChunkGenerator {
             long startDownload = System.currentTimeMillis();
             downloadAndProcessTiles(0, 0);
             long endDownload = System.currentTimeMillis();
-            System.out.println("[PERF] downloadAndProcessTiles took " + (endDownload - startDownload) + " ms");
+            // System.out.println("[PERF] downloadAndProcessTiles took " + (endDownload - startDownload) + " ms");
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -168,7 +178,7 @@ public class VoxelChunkGenerator extends ChunkGenerator {
         processChunksInBatches(chunksToProcess, world);
 
         long end = System.currentTimeMillis();
-        System.out.println("[PERF] regenChunks total took " + (end - start) + " ms");
+        // System.out.println("[PERF] regenChunks total took " + (end - start) + " ms");
     }
 
     private void processChunksInBatches(List<Chunk> chunks, World world) {
@@ -179,7 +189,7 @@ public class VoxelChunkGenerator extends ChunkGenerator {
             if (currentIndex.get() >= chunks.size()) {
                 task.cancel();
                 long end = System.currentTimeMillis();
-                System.out.println("[PERF] processChunksInBatches total took " + (end - start) + " ms");
+                // System.out.println("[PERF] processChunksInBatches total took " + (end - start) + " ms");
                 return;
             }
 
@@ -251,7 +261,7 @@ public class VoxelChunkGenerator extends ChunkGenerator {
             }
         }
         long end = System.currentTimeMillis();
-        System.out.println("[PERF] loadMaterialColors took " + (end - start) + " ms");
+        // System.out.println("[PERF] loadMaterialColors took " + (end - start) + " ms");
     }
 
     private Material getMaterial(String blockName) {
@@ -281,14 +291,16 @@ public class VoxelChunkGenerator extends ChunkGenerator {
             List<String> downloadedTileFiles = tileDownloader.downloadTiles(outputDirectory);
 
             if (!downloadedTileFiles.isEmpty()) {
-                runGpuVoxelizer(outputDirectory, downloadedTileFiles);
-                loadIndexedJson(new File(outputDirectory), downloadedTileFiles, chunkX, chunkZ);
+                // runGpuVoxelizer(outputDirectory, downloadedTileFiles);
+                // loadIndexedJson(new File(outputDirectory), downloadedTileFiles, chunkX, chunkZ);
+                runGpuVoxelizerBatch(outputDirectory, downloadedTileFiles);
+                loadIndexedVxch(new File(outputDirectory), downloadedTileFiles, chunkX, chunkZ);
             }
         } catch (IOException | InterruptedException e) {
             e.printStackTrace();
         }
         long end = System.currentTimeMillis();
-        System.out.println("[PERF] downloadAndProcessTiles took " + (end - start) + " ms");
+        // System.out.println("[PERF] downloadAndProcessTiles took " + (end - start) + " ms");
     }
 
     private void runGpuVoxelizer(String directory, List<String> tileFiles) throws IOException, InterruptedException {
@@ -318,7 +330,7 @@ public class VoxelChunkGenerator extends ChunkGenerator {
 
         executor.shutdown();
         long end = System.currentTimeMillis();
-        System.out.println("[PERF] runGpuVoxelizer took " + (end - start) + " ms");
+        // System.out.println("[PERF] runGpuVoxelizer took " + (end - start) + " ms");
     }
 
     private void processVoxelizerFile(String directory, String tileFileName) throws IOException, InterruptedException {
@@ -351,7 +363,7 @@ public class VoxelChunkGenerator extends ChunkGenerator {
         }
 
         long end = System.currentTimeMillis();
-        System.out.println("[PERF] processVoxelizerFile(" + tileFileName + ") took " + (end - start) + " ms");
+        // System.out.println("[PERF] processVoxelizerFile(" + tileFileName + ") took " + (end - start) + " ms");
     }
 
     private static final double MAX_COLOR_DISTANCE = 30.0;
@@ -421,7 +433,7 @@ public class VoxelChunkGenerator extends ChunkGenerator {
 
         executor.shutdown();
         long end = System.currentTimeMillis();
-        System.out.println("[PERF] loadIndexedJson took " + (end - start) + " ms");
+        // System.out.println("[PERF] loadIndexedJson took " + (end - start) + " ms");
     }
 
     private void processJsonFile(File jsonFile, String baseName, int chunkX, int chunkZ) throws IOException {
@@ -519,7 +531,7 @@ public class VoxelChunkGenerator extends ChunkGenerator {
             indexedBlocks.putIfAbsent(baseName, indexMap);
         }
         long end = System.currentTimeMillis();
-        System.out.println("[PERF] processJsonFile(" + jsonFile.getName() + ") took " + (end - start) + " ms");
+        // System.out.println("[PERF] processJsonFile(" + jsonFile.getName() + ") took " + (end - start) + " ms");
     }
 
     public void loadJson(String filename, double scaleX, double scaleY, double scaleZ, double offsetX, double offsetY, double offsetZ) throws IOException {
@@ -626,7 +638,7 @@ public class VoxelChunkGenerator extends ChunkGenerator {
             });
         }
         long end = System.currentTimeMillis();
-        System.out.println("[PERF] loadJson() total took " + (end - start) + " ms");
+        // System.out.println("[PERF] loadJson() total took " + (end - start) + " ms");
     }
 
     @Override
@@ -680,7 +692,8 @@ public class VoxelChunkGenerator extends ChunkGenerator {
                     return;
                 }
 
-                runGpuVoxelizer(outputDirectory, downloadedTileFiles);
+                // runGpuVoxelizer(outputDirectory, downloadedTileFiles);
+                runGpuVoxelizerBatch(outputDirectory, downloadedTileFiles);
 
                 Set<String> previousKeys = new HashSet<>(indexedBlocks.keySet());
 
@@ -697,7 +710,8 @@ public class VoxelChunkGenerator extends ChunkGenerator {
                     if (storedZOffset != null) adjustedTileZ = storedZOffset;
                 }
 
-                loadIndexedJson(new File(outputDirectory), downloadedTileFiles, adjustedTileX, adjustedTileZ);
+                // loadIndexedJson(new File(outputDirectory), downloadedTileFiles, adjustedTileX, adjustedTileZ);
+                loadIndexedVxch(new File(outputDirectory), downloadedTileFiles, adjustedTileX, adjustedTileZ);
                 Set<String> currentKeys = new HashSet<>(indexedBlocks.keySet());
                 currentKeys.removeAll(previousKeys);
 
@@ -780,6 +794,8 @@ public class VoxelChunkGenerator extends ChunkGenerator {
                     }
                 }
 
+                callback.accept(blockLocation);
+
                 final String finalInitialTileKey = initialTileKey;
                 indexedBlocks.forEach((tileKey, indexMap) -> {
                     if (!tileKey.equals(finalInitialTileKey) && indexMap != null && !(boolean) indexMap.get("isPlaced")) {
@@ -789,81 +805,180 @@ public class VoxelChunkGenerator extends ChunkGenerator {
                     }
                 });
 
-                callback.accept(blockLocation);
+                // callback.accept(blockLocation);
             } catch (IOException | InterruptedException e) {
                 e.printStackTrace();
                 int[] blockLocation = new int[]{210, 70, 0};
                 callback.accept(blockLocation);
             }
             long end = System.currentTimeMillis();
-            System.out.println("[PERF] loadChunk() total took " + (end - start) + " ms");
+            // System.out.println("[PERF] loadChunk() total took " + (end - start) + " ms");
         });
     }
 
+    // private void placeBlocks(World world, Map<String, Material> blockMap, int yOffset) {
+    //     long start = System.currentTimeMillis();
+    //     Set<Chunk> modifiedChunks = ConcurrentHashMap.newKeySet();
+
+    //     for (Map.Entry<String, Material> blockEntry : blockMap.entrySet()) {
+    //         String[] parts = blockEntry.getKey().split(",");
+    //         int originalX = Integer.parseInt(parts[0]);
+    //         int originalY = Integer.parseInt(parts[1]);
+    //         int originalZ = Integer.parseInt(parts[2]);
+
+    //         int newX = originalX;
+    //         int newY = originalY + yOffset;
+    //         int newZ = originalZ;
+
+    //         int blockChunkX = newX >> 4;
+    //         int blockChunkZ = newZ >> 4;
+
+    //         if (world == null) {
+    //             continue;
+    //         }
+
+    //         if (newY < world.getMinHeight() || newY >= world.getMaxHeight()) {
+    //             continue;
+    //         }
+
+    //         Chunk chunk = world.getChunkAt(blockChunkX, blockChunkZ);
+    //         if (!chunk.isLoaded()) {
+    //             chunk.load();
+    //         }
+
+    //         int localX = newX & 15;
+    //         int localZ = newZ & 15;
+
+    //         Material material = blockEntry.getValue();
+    //         if (material == null || !material.isBlock()) {
+    //             throw new IllegalArgumentException("Invalid block material: " + material);
+    //         }
+
+    //         ItemStack itemStack = new ItemStack(material);
+    //         BlockChanger.setSectionBlockAsynchronously(
+    //             chunk.getBlock(localX, newY, localZ).getLocation(),
+    //             itemStack,
+    //             false
+    //         );
+
+    //         Block pos = world.getBlockAt(newX, newY, newZ);
+    //         Chunk realChunk = pos.getChunk();
+    //         modifiedChunks.add(realChunk);
+    //     }
+
+    //     updateLighting(world, modifiedChunks);
+    //     long end = System.currentTimeMillis();
+    //     System.out.println("[PERF] placeBlocks() took " + (end - start) + " ms for " + blockMap.size() + " blocks");
+    // }
+
+    // private void updateLighting(World world, Set<Chunk> modifiedChunks) {
+    //     long start = System.currentTimeMillis();
+    //     for (Chunk chunk : modifiedChunks) {
+    //         int chunkX = chunk.getX();
+    //         int chunkZ = chunk.getZ();
+    //         world.refreshChunk(chunkX, chunkZ);
+    //     }
+    //     long end = System.currentTimeMillis();
+    //     System.out.println("[PERF] updateLighting() took " + (end - start) + " ms for " + modifiedChunks.size() + " chunks");
+    // }
+
     private void placeBlocks(World world, Map<String, Material> blockMap, int yOffset) {
         long start = System.currentTimeMillis();
-        Set<Chunk> modifiedChunks = ConcurrentHashMap.newKeySet();
-
-        for (Map.Entry<String, Material> blockEntry : blockMap.entrySet()) {
-            String[] parts = blockEntry.getKey().split(",");
+        
+        // Group locations by block material.
+        Map<Material, List<Location>> groups = new HashMap<>();
+        
+        // Also compute the overall bounding box (in block coordinates)
+        int globalMinX = Integer.MAX_VALUE;
+        int globalMaxX = Integer.MIN_VALUE;
+        int globalMinZ = Integer.MAX_VALUE;
+        int globalMaxZ = Integer.MIN_VALUE;
+        
+        // Process each coordinate key (formatted as "x,y,z")
+        for (Map.Entry<String, Material> entry : blockMap.entrySet()) {
+            String key = entry.getKey();
+            Material material = entry.getValue();
+        
+            // Split the key into x,y,z values and apply the Y offset.
+            String[] parts = key.split(",");
             int originalX = Integer.parseInt(parts[0]);
             int originalY = Integer.parseInt(parts[1]);
             int originalZ = Integer.parseInt(parts[2]);
-
+        
             int newX = originalX;
             int newY = originalY + yOffset;
             int newZ = originalZ;
-
-            int blockChunkX = newX >> 4;
-            int blockChunkZ = newZ >> 4;
-
-            if (world == null) {
+        
+            // Validate world and height limits.
+            if (world == null || newY < world.getMinHeight() || newY >= world.getMaxHeight()) {
                 continue;
             }
-
-            if (newY < world.getMinHeight() || newY >= world.getMaxHeight()) {
-                continue;
-            }
-
-            Chunk chunk = world.getChunkAt(blockChunkX, blockChunkZ);
-            if (!chunk.isLoaded()) {
-                chunk.load();
-            }
-
-            int localX = newX & 15;
-            int localZ = newZ & 15;
-
-            Material material = blockEntry.getValue();
+        
+            // Update the bounding box.
+            if (newX < globalMinX) { globalMinX = newX; }
+            if (newX > globalMaxX) { globalMaxX = newX; }
+            if (newZ < globalMinZ) { globalMinZ = newZ; }
+            if (newZ > globalMaxZ) { globalMaxZ = newZ; }
+        
+            // Create the target location.
+            Location loc = new Location(world, newX, newY, newZ);
+        
+            // Group locations by their material.
+            groups.computeIfAbsent(material, m -> new ArrayList<>()).add(loc);
+        }
+        
+        // Place blocks asynchronously per material group.
+        List<CompletableFuture<Void>> futures = new ArrayList<>();
+        for (Map.Entry<Material, List<Location>> groupEntry : groups.entrySet()) {
+            Material material = groupEntry.getKey();
+            List<Location> locations = groupEntry.getValue();
+        
             if (material == null || !material.isBlock()) {
                 throw new IllegalArgumentException("Invalid block material: " + material);
             }
-
+        
+            // Prepare an ItemStack for this material.
             ItemStack itemStack = new ItemStack(material);
-            BlockChanger.setSectionBlockAsynchronously(
-                chunk.getBlock(localX, newY, localZ).getLocation(),
-                itemStack,
-                false
-            );
-
-            Block pos = world.getBlockAt(newX, newY, newZ);
-            Chunk realChunk = pos.getChunk();
-            modifiedChunks.add(realChunk);
+        
+            // Call the batch asynchronous update.
+            CompletableFuture<Void> future = BlockChanger.setSectionBlocksAsynchronously(world, locations, itemStack);
+            futures.add(future);
         }
-
-        updateLighting(world, modifiedChunks);
+        
+        // Wait until all asynchronous placements complete.
+        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+        
+        // Calculate the chunk coordinates overlapping the bounding box.
+        // Each chunk is 16x16 blocks.
+        int chunkMinX = globalMinX >> 4;
+        int chunkMaxX = globalMaxX >> 4;
+        int chunkMinZ = globalMinZ >> 4;
+        int chunkMaxZ = globalMaxZ >> 4;
+        
+        // Refresh every chunk that overlaps the placement area.
+        for (int cx = chunkMinX; cx <= chunkMaxX; cx++) {
+            for (int cz = chunkMinZ; cz <= chunkMaxZ; cz++) {
+                // Ensure the chunk is loaded.
+                Chunk chunk = world.getChunkAt(cx, cz);
+                if (!chunk.isLoaded()) {
+                    chunk.load();
+                }
+                // Refresh the chunk to force a lighting update.
+                world.refreshChunk(cx, cz);
+            }
+        }
+        
         long end = System.currentTimeMillis();
-        System.out.println("[PERF] placeBlocks() took " + (end - start) + " ms for " + blockMap.size() + " blocks");
+        // Optionally log performance.
+        // System.out.println("[PERF] placeBlocks() took " + (end - start) + " ms for " + blockMap.size() + " blocks");
     }
-
-    private void updateLighting(World world, Set<Chunk> modifiedChunks) {
-        long start = System.currentTimeMillis();
-        for (Chunk chunk : modifiedChunks) {
-            int chunkX = chunk.getX();
-            int chunkZ = chunk.getZ();
-            world.refreshChunk(chunkX, chunkZ);
+    
+    
+    // Helper method to update lighting for modified chunks
+    private void updateLighting(World world, Set<Chunk> chunks) {
+        for (Chunk chunk : chunks) {
+            world.refreshChunk(chunk.getX(), chunk.getZ());
         }
-        long end = System.currentTimeMillis();
-        System.out.println("[PERF] updateLighting() took " + (end - start) + " ms for " + modifiedChunks.size() + " chunks");
     }
 
     private static final double EARTH_RADIUS = 6378137.0;
@@ -1025,6 +1140,363 @@ public class VoxelChunkGenerator extends ChunkGenerator {
     }
 
     // ECEF/ENU omitted debug
+
+    // Replace runGpuVoxelizer with batch version
+    private void runGpuVoxelizerBatch(String directory, List<String> tileFiles) 
+            throws IOException, InterruptedException {
+        long start = System.currentTimeMillis();
+        
+        List<String> cmd = new ArrayList<>();
+        cmd.add("./cuda_voxelizer");
+        for (String tile : tileFiles) {
+            cmd.add("-f");
+            cmd.add(new File(directory, tile).getAbsolutePath());
+        }
+        cmd.add("-o");
+        // cmd.add("vxch");
+        cmd.add("json");
+        cmd.add("-s");
+        cmd.add("128");
+        cmd.add("-output");
+        cmd.add(directory);
+
+        // read out command
+        System.out.println("Running voxelizer batch: " + cmd);
+
+        ProcessBuilder pb = new ProcessBuilder(cmd);
+        pb.directory(new File(System.getProperty("user.dir")));
+        pb.redirectErrorStream(true);
+        
+        Process process = pb.start();
+        int exitCode = process.waitFor();
+        
+        if (exitCode != 0) {
+            throw new RuntimeException("Voxelizer batch failed: exit=" + exitCode);
+        }
+        // System.out.println("[PERF] Batch voxelizer took " + (System.currentTimeMillis() - start) + "ms");
+    }
+
+    private static class ChunkRecord {
+        long offset;
+        int compressedSize;
+        int uncompressedSize;
+        short chunkType;
+        short reserved;
+    }
+
+    private void loadIndexedVxch(File directory, List<String> tileFiles, int chunkX, int chunkZ) throws IOException {
+        long start = System.currentTimeMillis();
+    
+        // Strip .glb extensions from tile names
+        for (int i = 0; i < tileFiles.size(); i++) {
+            String tile = tileFiles.get(i);
+            if (tile.endsWith(".glb")) {
+                tileFiles.set(i, tile.substring(0, tile.length() - 4));
+            }
+        }
+    
+        int numThreads = Runtime.getRuntime().availableProcessors() * 3;
+        ExecutorService executor = Executors.newFixedThreadPool(numThreads);
+        List<Future<?>> futures = new ArrayList<>();
+    
+        for (String tileFileName : tileFiles) {
+            String vxchName = tileFileName + "_128.vxch";
+            File vxchFile = new File(directory, vxchName);
+    
+            if (indexedBlocks.containsKey(tileFileName) || !vxchFile.exists()) continue;
+    
+            // Submit task to executor to process each tile file concurrently
+            futures.add(executor.submit(() -> {
+                try {
+                    processVxchFile(vxchFile, tileFileName, chunkX, chunkZ);
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }));
+        }
+    
+        // Wait for all tasks to complete
+        for (Future<?> future : futures) {
+            try {
+                future.get();
+            } catch (InterruptedException | ExecutionException e) {
+                e.printStackTrace();
+            }
+        }
+    
+        executor.shutdown();
+        // System.out.println("[PERF] loadIndexedVxch took " + (System.currentTimeMillis() - start) + "ms");
+    }
+    
+    private void processVxchFile(File vxchFile, String tileFileName, int chunkX, int chunkZ) throws IOException {
+        byte[] fileData = Files.readAllBytes(vxchFile.toPath());
+        ByteBuffer buf = ByteBuffer.wrap(fileData).order(ByteOrder.LITTLE_ENDIAN);
+    
+        // Parse header
+        byte[] sig = new byte[4];
+        buf.get(sig);
+        if (!"VXCH".equals(new String(sig, StandardCharsets.US_ASCII))) {
+            System.out.println("[ERROR] Invalid VXCH file: " + vxchFile);
+            return;
+        }
+    
+        // Read version (uint32) and other details
+        int version = buf.getInt();
+        if (version != 1) {
+            System.out.println("[WARN] Unsupported VXCH version: " + version);
+            return;
+        }
+    
+        int chunkSize = buf.getShort() & 0xFFFF;
+        int sizeX = buf.getShort() & 0xFFFF;
+        int sizeY = buf.getShort() & 0xFFFF;
+        int sizeZ = buf.getShort() & 0xFFFF;
+        int chunkCountX = buf.getShort() & 0xFFFF;
+        int chunkCountY = buf.getShort() & 0xFFFF;
+        int chunkCountZ = buf.getShort() & 0xFFFF;
+        int colorCount = buf.getInt();
+    
+        // Read color palette
+        List<Color> palette = new ArrayList<>(colorCount + 1);
+        palette.add(null); // Index 0 unused
+        for (int i = 0; i < colorCount; i++) {
+            int r = buf.get() & 0xFF;
+            int g = buf.get() & 0xFF;
+            int b = buf.get() & 0xFF;
+            int a = buf.get() & 0xFF;
+            palette.add(new Color(r, g, b, a));
+        }
+    
+        // Read chunk table
+        int totalChunks = chunkCountX * chunkCountY * chunkCountZ;
+        List<ChunkRecord> chunkTable = new ArrayList<>(totalChunks);
+        for (int i = 0; i < totalChunks; i++) {
+            ChunkRecord rec = new ChunkRecord();
+            rec.offset = buf.getLong();
+            rec.compressedSize = buf.getInt();
+            rec.uncompressedSize = buf.getInt();
+            rec.chunkType = (short)(buf.getShort() & 0xFFFF);
+            rec.reserved = (short)(buf.getShort() & 0xFFFF);
+            chunkTable.add(rec);
+        }
+    
+        // Translate tile using tileDownloader translation
+        double[] tileTranslation = getTileTranslation(tileFileName + ".glb", chunkX, chunkZ);
+    
+        // Process chunks
+        Map<String, Material> blockMap = processChunks(fileData, chunkTable,
+            chunkSize, sizeX, sizeY, sizeZ, chunkCountX, chunkCountY, chunkCountZ, palette, tileTranslation);
+    
+        // Store in indexedBlocks
+        Map<String, Object> indexMap = new HashMap<>();
+        indexMap.put("isPlaced", false);
+        indexMap.put("blocks", blockMap);
+        indexedBlocks.put(tileFileName, indexMap);
+    }
+    
+    private double[] getTileTranslation(String baseName, int chunkX, int chunkZ) {
+        Map<String, double[]> tileTranslations = tileDownloader.getTileTranslations();
+        double[] tileTranslation = new double[3];
+        if (tileTranslations != null) {
+            double[] translation = tileTranslations.get(baseName);
+            if (translation != null) {
+                double rawX = translation[0];
+                double rawY = translation[1];
+                double rawZ = translation[2];
+    
+                tileTranslation[0] = (rawX * scaleX) + offsetX + (chunkX * 16);
+                tileTranslation[1] = (rawY * scaleY) + offsetY;
+                tileTranslation[2] = (rawZ * scaleZ) + offsetZ + (chunkZ * 16);
+            }
+        }
+        return tileTranslation;
+    }
+    
+    private Map<String, Material> processChunks(byte[] fileData, List<ChunkRecord> chunkTable,
+        int chunkSize, int sizeX, int sizeY, int sizeZ,
+        int chunkCountX, int chunkCountY, int chunkCountZ,
+        List<Color> palette, double[] tileTranslation) {
+    
+        Map<String, Material> blockMap = new HashMap<>();
+        int chunkIdx = 0;
+    
+        for (int cz = 0; cz < chunkCountZ; cz++) {
+            for (int cy = 0; cy < chunkCountY; cy++) {
+                for (int cx = 0; cx < chunkCountX; cx++) {
+                    ChunkRecord rec = chunkTable.get(chunkIdx++);
+                    if (rec.chunkType == 0) continue;
+    
+                    if (rec.offset + rec.compressedSize > fileData.length) {
+                        System.out.println("[ERROR] Invalid chunk offset/size");
+                        continue;
+                    }
+    
+                    byte[] compData = Arrays.copyOfRange(
+                        fileData,
+                        (int) rec.offset,
+                        (int) rec.offset + rec.compressedSize
+                    );
+    
+                    byte[] uncompressed = decompressChunkData(compData, rec.uncompressedSize);
+                    if (uncompressed.length != rec.uncompressedSize) {
+                        System.out.println("[WARN] Decompression size mismatch");
+                        continue;
+                    }
+    
+                    int x0 = cx * chunkSize;
+                    int y0 = cy * chunkSize;
+                    int z0 = cz * chunkSize;
+                    int xMax = Math.min(x0 + chunkSize, sizeX);
+                    int yMax = Math.min(y0 + chunkSize, sizeY);
+                    int zMax = Math.min(z0 + chunkSize, sizeZ);
+    
+                    // if (rec.chunkType == 1) {
+                    //     processUniformChunk(uncompressed, x0, y0, z0, xMax, yMax, zMax, palette, blockMap, tileTranslation);
+                    // } else if (rec.chunkType == 2) {
+                        processSparseChunk(uncompressed, x0, y0, z0,
+                            xMax - x0, yMax - y0, zMax - z0, palette, blockMap, tileTranslation);
+                    // }
+                }
+            }
+        }
+    
+        return blockMap;
+    }
+    
+    private void processUniformChunk(byte[] data,
+    int x0, int y0, int z0,
+    int xMax, int yMax, int zMax,
+    List<Color> palette, Map<String, Material> blockMap, double[] tileTranslation) {
+
+if (data.length < 2) return;
+
+// Read color index as little-endian (matching C++ code on little-endian systems)
+int colorIndex = ByteBuffer.wrap(data, 0, 2)
+                           .order(ByteOrder.LITTLE_ENDIAN)
+                           .getShort() & 0xFFFF;
+
+if (colorIndex == 0 || colorIndex >= palette.size()) {
+    System.out.println("[WARN] Invalid color index: " + colorIndex);
+    return;
+}
+
+Material mat = getMaterialFromColor(palette.get(colorIndex));
+
+for (int x = x0; x < xMax; x++) {
+    for (int y = y0; y < yMax; y++) {
+        for (int z = z0; z < zMax; z++) {
+            int translatedX = (int) (x + tileTranslation[0]);
+            int translatedY = (int) (y + tileTranslation[1]);
+            int translatedZ = (int) (z + tileTranslation[2]);
+            blockMap.put(translatedX + "," + translatedY + "," + translatedZ, mat);
+        }
+    }
+}
+}
+    
+    // Similar modifications for processSparseChunk...
+    private void processSparseChunk(byte[] data,
+        int x0, int y0, int z0,
+        int dx, int dy, int dz,
+        List<Color> palette, Map<String, Material> blockMap, double[] tileTranslation) {
+
+    int totalCells = dx * dy * dz;
+    int bitmaskBytes = (totalCells + 7) / 8;
+
+    if (data.length < bitmaskBytes + 2) {
+        System.out.println("[WARN] Sparse chunk data too small: expected at least " + (bitmaskBytes + 2) + ", got " + data.length);
+        return;
+    }
+
+    ByteBuffer buf = ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN);
+
+    byte[] bitmask = new byte[bitmaskBytes];
+    buf.get(bitmask);
+
+    // Read color indices as little-endian
+    int colorCount = (data.length - bitmaskBytes) / 2;
+    short[] colors = new short[colorCount];
+    for (int i = 0; i < colorCount; i++) {
+        colors[i] = buf.getShort();
+    }
+
+    int colorIdx = 0;
+    for (int cell = 0; cell < totalCells; cell++) {
+        int bytePos = cell / 8;
+        int bitPos = cell % 8;
+        if ((bitmask[bytePos] & (1 << bitPos)) == 0) continue;
+
+        if (colorIdx >= colors.length) {
+            System.out.println("[WARN] Color index out of bounds: " + colorIdx);
+            break;
+        }
+
+        int colorIndex = colors[colorIdx++] & 0xFFFF;
+        if (colorIndex == 0 || colorIndex >= palette.size()) {
+            System.out.println("[WARN] Invalid color index: " + colorIndex);
+            continue;
+        }
+
+        int lz = cell / (dx * dy);
+        int rem = cell % (dx * dy);
+        int ly = rem / dx;
+        int lx = rem % dx;
+
+        int translatedX = (int) (x0 + lx + tileTranslation[0]);
+        int translatedY = (int) (y0 + ly + tileTranslation[1]);
+        int translatedZ = (int) (z0 + lz + tileTranslation[2]);
+
+        String key = translatedX + "," + translatedY + "," + translatedZ;
+        blockMap.put(key, getMaterialFromColor(palette.get(colorIndex)));
+    }
+}
+
+    private Material getMaterialFromColor(Color color) {
+        JSONArray rgba = new JSONArray()
+            .put(color.getRed())
+            .put(color.getGreen())
+            .put(color.getBlue())
+            .put(color.getAlpha());
+        return mapRgbaToMaterial(rgba);
+    }
+
+    private byte[] decompressChunkData(byte[] compData, int uncompressedSize) {
+        ByteArrayOutputStream out = new ByteArrayOutputStream(uncompressedSize);
+        int pos = 0;
+        
+        try {
+            while (pos < compData.length && out.size() < uncompressedSize) {
+                int header = compData[pos++] & 0xFF;
+                
+                if (header <= 127) { // Literal run
+                    int len = header + 1;
+                    if (pos + len > compData.length) break;
+                    out.write(compData, pos, len);
+                    pos += len;
+                } else { // RLE run
+                    // Convert to signed byte equivalent
+                    int signedHeader = (byte) header;
+                    int runLength = 1 - signedHeader;
+                    
+                    if (pos >= compData.length) break;
+                    byte val = compData[pos++];
+                    for (int i = 0; i < runLength; i++) {
+                        if (out.size() >= uncompressedSize) break;
+                        out.write(val);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            System.out.println("[ERROR] Decompression failed: " + e.getMessage());
+        }
+        
+        if (out.size() != uncompressedSize) {
+            System.out.println("[WARN] Decompression size mismatch: expected=" 
+                + uncompressedSize + ", got=" + out.size());
+        }
+        
+        return out.toByteArray();
+    }
 
     @Override
     public boolean shouldGenerateNoise() { return false; }

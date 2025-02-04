@@ -118,8 +118,8 @@ public class PlayerMovementListener implements Listener {
         if (lastLoc == null || lastLoc.distance(to) >= LOAD_THRESHOLD) {
             lastLoadedLocations.put(player, to.clone());
 
-            player.sendMessage("[DEBUG] Now loading chunk at final coords ("
-                    + finalTileX + ", " + finalTileZ + ") for lat/lng: (" + lat + ", " + lng + ")");
+            // player.sendMessage("[DEBUG] Now loading chunk at final coords ("
+            //         + finalTileX + ", " + finalTileZ + ") for lat/lng: (" + lat + ", " + lng + ")");
             
             // 7) Actually load that chunk asynchronously
             generator.loadChunk(pid, finalTileX, finalTileZ, false, (blockLocation) -> {
