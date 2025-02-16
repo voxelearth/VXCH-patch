@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <iostream>
 #include <cassert>
+#include <fstream>         
 
 // TriMesh for model importing
 #include "TriMesh.h"
@@ -20,6 +21,8 @@
 
 // CPU voxelizer fallback
 #include "cpu_voxelizer.h"
+
+#include "debug.h"
 
 // Forward declarations of our voxelize.cu kernels
 void voxelize(const voxinfo& v,
@@ -47,20 +50,32 @@ enum class OutputFormat {
     output_obj_cubes,
     output_vox,
     output_glb,
-    output_json
-};
-static const char* OutputFormats[] = {
-    "binvox file", "morton encoded blob",
-    "obj file (pointcloud)", "obj file (cubes)",
-    "magicavoxel file", "glb file", "minecraft json"
+    output_json,
+    output_vxch
 };
 
-static std::vector<std::string> inputFiles;   // multiple -f
+static const char* OutputFormats[] = {
+    "binvox file",
+    "morton encoded blob",
+    "obj file (pointcloud)",
+    "obj file (cubes)",
+    "magicavoxel file",
+    "glb file",
+    "indexed json",
+    "indexed binary (.vxch)"
+};
+
+static std::vector<std::string> inputFiles;   // multiple -f or -filelist
 static unsigned int gridsize = 256;
-static OutputFormat outputformat = OutputFormat::output_glb;
+static OutputFormat outputformat = OutputFormat::output_glb; // default: .GLB
 static bool forceCPU = false;
 static bool solidVoxelization = false;
 static std::string output_directory = "";
+
+// A new flag for 3D Tiles bounding box
+static bool tiles3D = false;
+
+bool g_debug = false;  // Default: silent mode
 
 // A convenient version string
 static std::string version_number = "v0.6";
@@ -69,25 +84,28 @@ static std::string version_number = "v0.6";
 // Print usage info
 // ---------------------------------------------------------------------------
 static void printHeader() {
-    std::printf("## CUDA VOXELIZER\n");
-    std::cout << "CUDA Voxelizer " << version_number << " by Jeroen Baert\n"
-              << "https://github.com/Forceflow/cuda_voxelizer\n";
+    PRINT_DEBUG("## CUDA VOXELIZER\n");
+    PRINT_COUT("CUDA Voxelizer " << version_number << " by Jeroen Baert\n");
+    PRINT_COUT("https://github.com/Forceflow/cuda_voxelizer\n");
 }
 
 static void printHelp() {
     std::cout << "\n## HELP\n"
               << "Program options:\n"
               << " -f <mesh file>      (can be repeated for multiple files)\n"
+              << " -filelist <txt>     (alternative to -f: a text file with one GLB/OBJ/etc per line)\n"
               << " -s <grid size>      (default 256)\n"
-              << " -o <output format>  (binvox, morton, obj, obj_points, vox, glb, json)\n"
+              << " -o <output format>  (binvox, morton, obj, obj_points, vox, glb, json, vxch)\n"
               << " -cpu                (force CPU voxelization)\n"
               << " -solid              (enable solid/watertight voxelization)\n"
+              << " -3dtiles            (use hard-coded bounding box for a tile)\n"
               << " -output <dir>       (output directory)\n"
               << " -h                  (help)\n";
 }
 
 static void printExample() {
-    std::cout << "Example: ./cuda_voxelizer -f tile1.glb -f tile2.glb -s 512 -o json -output out\n";
+    std::cout << "Example 1: ./cuda_voxelizer -f tile1.glb -f tile2.glb -s 512 -o json -output out\n";
+    std::cout << "Example 2: ./cuda_voxelizer -filelist my_tiles.txt -s 512 -o vxch -output out\n";
 }
 
 // ---------------------------------------------------------------------------
@@ -103,21 +121,43 @@ static void parseArgs(int argc, char* argv[]) {
         if(arg == "-f" && (i+1 < argc)) {
             inputFiles.push_back(argv[++i]);
         }
+        else if(arg == "-filelist" && (i+1 < argc)) {
+            std::string filelist_name = argv[++i];
+            std::ifstream fin(filelist_name);
+            if(!fin.is_open()){
+                PRINT_CERR("[Err] Could not open filelist: " << filelist_name << "\n");
+                exit(EXIT_FAILURE);
+            }
+            std::string line;
+            const char* whitespace = " \t\r\n";
+            while(std::getline(fin, line)){
+                size_t start = line.find_first_not_of(whitespace);
+                if(start == std::string::npos)
+                    continue;
+                size_t end = line.find_last_not_of(whitespace);
+                std::string trimmed = line.substr(start, end - start + 1);
+                if(!trimmed.empty()){
+                    inputFiles.push_back(trimmed);
+                }
+            }
+            fin.close();
+        }
         else if(arg == "-s" && (i+1 < argc)) {
-            gridsize = (unsigned int)std::stoi(argv[++i]);
+            gridsize = static_cast<unsigned int>(std::stoi(argv[++i]));
         }
         else if(arg == "-o" && (i+1 < argc)) {
             std::string fmt = argv[++i];
             std::transform(fmt.begin(), fmt.end(), fmt.begin(), ::tolower);
-            if(fmt == "binvox") outputformat = OutputFormat::output_binvox;
-            else if(fmt == "morton") outputformat = OutputFormat::output_morton;
-            else if(fmt == "obj") outputformat = OutputFormat::output_obj_cubes;
-            else if(fmt == "obj_points") outputformat = OutputFormat::output_obj_points;
-            else if(fmt == "vox") outputformat = OutputFormat::output_vox;
-            else if(fmt == "glb") outputformat = OutputFormat::output_glb;
-            else if(fmt == "json") outputformat = OutputFormat::output_json;
+            if(fmt == "binvox")         outputformat = OutputFormat::output_binvox;
+            else if(fmt == "morton")      outputformat = OutputFormat::output_morton;
+            else if(fmt == "obj")         outputformat = OutputFormat::output_obj_cubes;
+            else if(fmt == "obj_points")  outputformat = OutputFormat::output_obj_points;
+            else if(fmt == "vox")         outputformat = OutputFormat::output_vox;
+            else if(fmt == "glb")         outputformat = OutputFormat::output_glb;
+            else if(fmt == "json")        outputformat = OutputFormat::output_json;
+            else if(fmt == "vxch")        outputformat = OutputFormat::output_vxch;
             else {
-                std::cerr << "[Err] Unknown output format: " << fmt << "\n";
+                PRINT_CERR("[Err] Unknown output format: " << fmt << "\n");
                 exit(EXIT_FAILURE);
             }
         }
@@ -127,6 +167,9 @@ static void parseArgs(int argc, char* argv[]) {
         else if(arg == "-solid") {
             solidVoxelization = true;
         }
+        else if(arg == "-3dtiles") {
+            tiles3D = true;
+        }
         else if(arg == "-output" && (i+1 < argc)) {
             output_directory = argv[++i];
         }
@@ -134,14 +177,17 @@ static void parseArgs(int argc, char* argv[]) {
             printHelp();
             exit(EXIT_SUCCESS);
         }
+        else if(arg == "-debug") {
+            g_debug = true;
+        }
         else {
-            std::cerr << "[Err] Unknown argument: " << arg << "\n";
+            PRINT_CERR("[Err] Unknown argument: " << arg << "\n");
             printHelp();
             exit(EXIT_FAILURE);
         }
     }
     if(inputFiles.empty()){
-        std::cerr << "[Err] No input files specified (use -f file)\n";
+        PRINT_CERR("[Err] No input files specified (use -f file or -filelist txt)\n");
         printExample();
         exit(EXIT_FAILURE);
     }
@@ -149,8 +195,6 @@ static void parseArgs(int argc, char* argv[]) {
 
 // ---------------------------------------------------------------------------
 // Helpers to copy mesh data into "CUDA-managed" memory (unified memory).
-// (Or you can do pinned memory + cudaMemcpy, etc. The key is we only do
-// this for each mesh we process sequentially.)
 // ---------------------------------------------------------------------------
 static float* meshToGPU_managed(const trimesh::TriMesh* mesh) {
     Timer t; t.start();
@@ -169,7 +213,7 @@ static float* meshToGPU_managed(const trimesh::TriMesh* mesh) {
         d_tri[base + 6] = v2.x; d_tri[base + 7] = v2.y; d_tri[base + 8] = v2.z;
     }
     t.stop();
-    std::printf("[Perf] Copied %zu triangles to GPU in %.1f ms\n", ntri, t.elapsed_time_milliseconds);
+    PRINT_DEBUG("[Perf] Copied %zu triangles to GPU in %.1f ms\n", ntri, t.elapsed_time_milliseconds);
     return d_tri;
 }
 
@@ -190,7 +234,7 @@ static float* uvsToGPU_managed(const trimesh::TriMesh* mesh) {
         d_uv[base+4] = uv2.u;  d_uv[base+5] = uv2.v;
     }
     t.stop();
-    std::printf("[Perf] Copied UVs for %zu triangles to GPU in %.1f ms\n", ntri, t.elapsed_time_milliseconds);
+    PRINT_DEBUG("[Perf] Copied UVs for %zu triangles to GPU in %.1f ms\n", ntri, t.elapsed_time_milliseconds);
     return d_uv;
 }
 
@@ -213,7 +257,7 @@ static uchar4* textureToGPU_managed(const trimesh::TriMesh* mesh){
         d_tex[i].w = tex.imageData[4*i + 3];
     }
     t.stop();
-    std::printf("[Perf] Copied texture to GPU in %.1f ms\n", t.elapsed_time_milliseconds);
+    PRINT_DEBUG("[Perf] Copied texture to GPU in %.1f ms\n", t.elapsed_time_milliseconds);
     return d_tex;
 }
 
@@ -222,44 +266,63 @@ static uchar4* textureToGPU_managed(const trimesh::TriMesh* mesh){
 // ---------------------------------------------------------------------------
 static void processSingleFile(const std::string &file) {
     // Load the mesh with TriMesh
-    std::printf("[Info] Loading mesh: %s\n", file.c_str());
+    PRINT_DEBUG("[Info] Loading mesh: %s\n", file.c_str());
     trimesh::TriMesh* mesh = trimesh::TriMesh::read(file.c_str());
     if(!mesh){
-        std::cerr << "[Err] Could not load mesh " << file << "\n";
+        PRINT_CERR("[Err] Could not load mesh " << file << "\n");
         return;
     }
     mesh->need_faces();
     mesh->need_bbox();
-    // optionally: if you know the mesh has UVs
-    // mesh->need_uvs(); // if TriMesh had that method
 
     // Some stats
     size_t ntri = mesh->faces.size();
     size_t nvert = mesh->vertices.size();
-    std::printf("[Mesh] %s: Triangles=%zu, Vertices=%zu\n", file.c_str(), ntri, nvert);
+    PRINT_DEBUG("[Mesh] %s: Triangles=%zu, Vertices=%zu\n", file.c_str(), ntri, nvert);
 
-    // bounding box logic (the same that you used)
-    float scale_factor = 1.3f;
-    float tile_x = 12.26f * scale_factor;
-    float tile_y = 36.45f * scale_factor;
-    float tile_z = 47.59f * scale_factor;
-    float3 node_trans = make_float3(
-        mesh->node_translation[0],
-        mesh->node_translation[1],
-        mesh->node_translation[2]
-    );
-    float3 bbmin = node_trans - make_float3(tile_x/2.f, tile_y/2.f, tile_z/2.f);
-    float3 bbmax = node_trans + make_float3(tile_x/2.f, tile_y/2.f, tile_z/2.f);
-    AABox<float3> voxelBox(bbmin, bbmax);
+    // -----------------------------------------------------------------------
+    // BOUNDING BOX LOGIC
+    // If "-3dtiles" was specified, we use the hard-coded tile bounding box.
+    // Otherwise, we use the mesh's own bounding box.
+    // -----------------------------------------------------------------------
+    AABox<float3> voxelBox;
+    {
+        if (tiles3D) {
+            // Hard-coded bounding box for 3DTiles
+            float scale_factor = 1.3f;
+            float tile_x = 12.26f * scale_factor;
+            float tile_y = 36.45f * scale_factor;
+            float tile_z = 47.59f * scale_factor;
+            float3 node_trans = make_float3(
+                mesh->node_translation[0],
+                mesh->node_translation[1],
+                mesh->node_translation[2]
+            );
+            float3 bbmin = node_trans - make_float3(tile_x/2.f, tile_y/2.f, tile_z/2.f);
+            float3 bbmax = node_trans + make_float3(tile_x/2.f, tile_y/2.f, tile_z/2.f);
+            voxelBox = AABox<float3>(bbmin, bbmax);
+            PRINT_DEBUG("[Info] Using 3D Tiles bounding box.\n");
+        } else {
+            // Normal bounding box around the mesh
+            // mesh->bbox.min/max are trimesh::vec
+            float3 bbmin = trimesh_to_float3<trimesh::point>(mesh->bbox.min);
+            float3 bbmax = trimesh_to_float3<trimesh::point>(mesh->bbox.max);
+            voxelBox = AABox<float3>(bbmin, bbmax);
+            PRINT_DEBUG("[Info] Using mesh-based bounding box.\n");
+        }
+    }
+
+    // Optionally expand the bounding box to a cube
     AABox<float3> cubeBox = createMeshBBCube<float3>(voxelBox);
 
+    // Construct voxinfo
     voxinfo vinfo(cubeBox, make_uint3(gridsize, gridsize, gridsize), ntri);
     vinfo.print();
 
     // Allocate memory for vtable + color
     size_t voxel_count = (size_t)gridsize * gridsize * gridsize;
-    size_t vtable_size = ( (voxel_count + 31)/32 ) * 4; // in bytes
-    size_t color_size = voxel_count * sizeof(uchar4);
+    size_t vtable_size = ((voxel_count + 31)/32) * 4; // in bytes
+    size_t color_size  = voxel_count * sizeof(uchar4);
 
     unsigned int* vtable = nullptr;
     uchar4* color_table = nullptr;
@@ -270,7 +333,7 @@ static void processSingleFile(const std::string &file) {
 
     // Transfer data to GPU
     float* d_tri = meshToGPU_managed(mesh);
-    float* d_uv = nullptr;
+    float* d_uv  = nullptr;
     if(!mesh->uvs.empty()){
         d_uv = uvsToGPU_managed(mesh);
     } else {
@@ -308,13 +371,12 @@ static void processSingleFile(const std::string &file) {
 
     // Copy data to host
     std::vector<unsigned int> hostVtable(vtable_size/sizeof(unsigned int));
-    std::vector<uchar4> hostColor(voxel_count);
+    std::vector<uchar4>       hostColor(voxel_count);
     cudaMemcpy(hostVtable.data(), vtable, vtable_size, cudaMemcpyDeviceToHost);
     cudaMemcpy(hostColor.data(), color_table, color_size, cudaMemcpyDeviceToHost);
 
     // Write output
     std::string baseName = file;
-    // strip off directory
     {
         size_t slashPos = baseName.find_last_of("/\\");
         if(slashPos != std::string::npos) {
@@ -350,10 +412,13 @@ static void processSingleFile(const std::string &file) {
             write_gltf(hostVtable.data(), hostColor.data(), vinfo, baseName);
             break;
         case OutputFormat::output_json:
+            write_indexed_json(hostVtable.data(), hostColor.data(), vinfo, baseName);
+            break;
+        case OutputFormat::output_vxch:
             write_indexed_binary(hostVtable.data(), hostColor.data(), vinfo, baseName);
             break;
     }
-    std::printf("[Info] Wrote output for %s\n", file.c_str());
+    PRINT_DEBUG("[Info] Wrote output for %s\n", file.c_str());
 
     // Cleanup
     cudaFree(vtable);
@@ -371,20 +436,23 @@ int main(int argc, char* argv[]){
     printHeader();
     parseArgs(argc, argv);
 
-    std::printf("[Info] Processing %zu file(s)\n", inputFiles.size());
-    std::printf("[Info] Grid size=%u\n", gridsize);
-    std::printf("[Info] Output format=%s\n", OutputFormats[(int)outputformat]);
-    std::printf("[Info] CPU forced? %s\n", (forceCPU?"Yes":"No"));
-    std::printf("[Info] Solid voxelization? %s\n", (solidVoxelization?"Yes":"No"));
+    PRINT_DEBUG("[Info] Processing %zu file(s)\n", inputFiles.size());
+    PRINT_DEBUG("[Info] Grid size=%u\n", gridsize);
+    PRINT_DEBUG("[Info] Output format=%s\n", OutputFormats[(int)outputformat]);
+    PRINT_DEBUG("[Info] CPU forced? %s\n", (forceCPU?"Yes":"No"));
+    PRINT_DEBUG("[Info] Solid voxelization? %s\n", (solidVoxelization?"Yes":"No"));
     if(!output_directory.empty()){
-        std::printf("[Info] Output directory=%s\n", output_directory.c_str());
+        PRINT_DEBUG("[Info] Output directory=%s\n", output_directory.c_str());
+    }
+    if(tiles3D){
+        PRINT_DEBUG("[Info] 3D Tiles bounding box mode is ENABLED\n");
     }
 
     // If not CPU, init CUDA
     if(!forceCPU){
         bool ok = initCuda();
         if(!ok){
-            std::cerr << "[Warn] No suitable CUDA GPU found. Falling back to CPU.\n";
+            PRINT_CERR("[Warn] No suitable CUDA GPU found. Falling back to CPU.\n");
             forceCPU = true;
         }
     }
@@ -394,6 +462,6 @@ int main(int argc, char* argv[]){
         processSingleFile(f);
     }
 
-    std::printf("[All Done] Processed %zu files.\n", inputFiles.size());
+    PRINT_DEBUG("[All Done] Processed %zu files.\n", inputFiles.size());
     return 0;
 }

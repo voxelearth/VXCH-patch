@@ -347,8 +347,10 @@ public class VoxelChunkGenerator extends ChunkGenerator {
         ProcessBuilder processBuilder = new ProcessBuilder(
                 "./cuda_voxelizer",
                 "-f", file.getAbsolutePath(),
-                "-o", "json",
+                // "-o", "json",
+                "-o", "vxch",
                 "-s", "128",
+                "-3dtiles",
                 "-output", directory
         );
 
@@ -1153,8 +1155,9 @@ public class VoxelChunkGenerator extends ChunkGenerator {
             cmd.add(new File(directory, tile).getAbsolutePath());
         }
         cmd.add("-o");
-        // cmd.add("vxch");
-        cmd.add("json");
+        cmd.add("vxch");
+        // cmd.add("json");
+        cmd.add("-3dtiles");
         cmd.add("-s");
         cmd.add("128");
         cmd.add("-output");

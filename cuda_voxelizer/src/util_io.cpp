@@ -1,3 +1,4 @@
+#include "debug.h"
 #include "util_io.h"
 
 // For concurrency safety
@@ -848,11 +849,10 @@ void write_indexed_binary(const unsigned int* vtable,
     out.close();
 
 #ifndef SILENT
-    std::cout << "[I/O] Wrote chunked voxel file: " << filename_output << "\n"
-              << "      Dimensions= ("<<sizeX<<" x "<<sizeY<<" x "<<sizeZ<<")\n"
-              << "      Chunks= ("<<chunkCountX<<" x "<<chunkCountY<<" x "<<chunkCountZ<<") => "
-              << totalChunks <<"\n"
-              << "      Unique colors= " << colorCount << std::endl;
+PRINT_DEBUG("[I/O] Wrote chunked voxel file: %s\n", filename_output.c_str());
+PRINT_DEBUG("      Dimensions= (%d x %d x %d)\n", sizeX, sizeY, sizeZ);
+PRINT_DEBUG("      Chunks= (%d x %d x %d) => %d\n", chunkCountX, chunkCountY, chunkCountZ, totalChunks);
+PRINT_DEBUG("      Unique colors= %d\n", colorCount);
 #endif
 }
 
