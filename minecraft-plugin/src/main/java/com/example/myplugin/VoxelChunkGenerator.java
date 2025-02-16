@@ -48,6 +48,11 @@ import java.nio.charset.StandardCharsets;
 // location
 import org.bukkit.Location;
 
+// bufferedwriter
+import java.io.BufferedWriter;
+// filewriter
+import java.io.FileWriter;
+
 /**
  * A profiled version of VoxelChunkGenerator that times major operations
  * to identify performance bottlenecks.
@@ -84,16 +89,17 @@ public class VoxelChunkGenerator extends ChunkGenerator {
     private static final String SESSION_DIR = "./session";
     private static final long CLEANUP_INTERVAL = TimeUnit.HOURS.toMillis(1); // 1 hour
 
-    // Removed or commented out debug prints; replaced with [PERF] timers where needed
+    private final VoxelEarth plugin;
 
-    public VoxelChunkGenerator() {
+    public VoxelChunkGenerator(VoxelEarth plugin) {
+        this.plugin = plugin;
         long start = System.currentTimeMillis();
         // System.out.println("[DEBUG] VoxelChunkGenerator initialized");
         // System.out.println("[DEBUG] LAT_ORIGIN: " + LAT_ORIGIN + ", LNG_ORIGIN: " + LNG_ORIGIN);
         // System.out.println("[DEBUG] Default scaleFactor (metersPerBlock): " + scaleFactor);
         // System.out.println("[DEBUG] Using a tile radius of 25 for single tile loading.");
 
-        tileDownloader = new TileDownloader(API_KEY, LNG_ORIGIN, LAT_ORIGIN, 25);
+        tileDownloader = new TileDownloader(plugin, API_KEY, LNG_ORIGIN, LAT_ORIGIN, 25);
         initializeSessionDirectory();
         scheduleSessionCleanup();
         loadMaterialColors();
@@ -288,7 +294,7 @@ public class VoxelChunkGenerator extends ChunkGenerator {
             String outputDirectory = SESSION_DIR;
             tileDownloader.setCoordinates(LNG_ORIGIN, LAT_ORIGIN);
 
-            List<String> downloadedTileFiles = tileDownloader.downloadTiles(outputDirectory);
+            List<String> downloadedTileFiles = tileDownloader.downloadTiles(outputDirectory, null);
 
             if (!downloadedTileFiles.isEmpty()) {
                 // runGpuVoxelizer(outputDirectory, downloadedTileFiles);
@@ -685,10 +691,15 @@ public class VoxelChunkGenerator extends ChunkGenerator {
 
                 double[] latLng = minecraftToLatLng(tileX, tileZ);
 
-                tileDownloader.setCoordinates(latLng[1], latLng[0]);
-                tileDownloader.setRadius(25);
+                // pick the per-player radius
+                double radius = isVisit
+                    ? plugin.getVisitRadius(playerUUID)
+                    : plugin.getMovementRadius(playerUUID);
 
-                List<String> downloadedTileFiles = tileDownloader.downloadTiles(outputDirectory);
+                tileDownloader.setCoordinates(latLng[1], latLng[0]);
+                tileDownloader.setRadius(radius);
+
+                List<String> downloadedTileFiles = tileDownloader.downloadTiles(outputDirectory, playerUUID);
                 if (downloadedTileFiles.isEmpty()) {
                     callback.accept(blockLocation);
                     return;
@@ -1147,37 +1158,48 @@ public class VoxelChunkGenerator extends ChunkGenerator {
     private void runGpuVoxelizerBatch(String directory, List<String> tileFiles) 
             throws IOException, InterruptedException {
         long start = System.currentTimeMillis();
-        
+
+        // Create a temporary text file listing all tile files
+        File tempFile = File.createTempFile("tilelist", ".txt");
+        tempFile.deleteOnExit();
+        try (BufferedWriter writer = new BufferedWriter(new FileWriter(tempFile))) {
+            for (String tile : tileFiles) {
+                String absPath = new File(directory, tile).getAbsolutePath();
+                writer.write(absPath);
+                writer.newLine();
+            }
+        }
+
+        // Build command: use -filelist with the temporary file, and add the -3dtiles flag
         List<String> cmd = new ArrayList<>();
         cmd.add("./cuda_voxelizer");
-        for (String tile : tileFiles) {
-            cmd.add("-f");
-            cmd.add(new File(directory, tile).getAbsolutePath());
-        }
+        cmd.add("-filelist");
+        cmd.add(tempFile.getAbsolutePath());
+        cmd.add("-3dtiles");
         cmd.add("-o");
         cmd.add("vxch");
-        // cmd.add("json");
-        cmd.add("-3dtiles");
         cmd.add("-s");
         cmd.add("128");
         cmd.add("-output");
         cmd.add(directory);
 
-        // read out command
+        // Output the command for debugging purposes
         System.out.println("Running voxelizer batch: " + cmd);
 
         ProcessBuilder pb = new ProcessBuilder(cmd);
         pb.directory(new File(System.getProperty("user.dir")));
         pb.redirectErrorStream(true);
-        
+
         Process process = pb.start();
         int exitCode = process.waitFor();
-        
+
         if (exitCode != 0) {
             throw new RuntimeException("Voxelizer batch failed: exit=" + exitCode);
         }
+        // Optionally, you could output the elapsed time
         // System.out.println("[PERF] Batch voxelizer took " + (System.currentTimeMillis() - start) + "ms");
     }
+
 
     private static class ChunkRecord {
         long offset;

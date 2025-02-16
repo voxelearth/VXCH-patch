@@ -9,6 +9,12 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import java.util.UUID;
+
+// arrays
+import java.util.Arrays;
+
+
 /**
  * Profiled version of TileDownloader that times tile downloads.
  *
@@ -17,6 +23,9 @@ import java.util.Map;
  * ... so you can retrieve them afterward if needed.
  */
 public class TileDownloader {
+
+    private VoxelEarth plugin;
+
     private String apiKey;
     private double latitude;
     private double longitude;
@@ -27,7 +36,8 @@ public class TileDownloader {
     // (tileFilename is the final .glb name, e.g. "a1b2c3.glb")
     private Map<String, double[]> tileTranslations = new HashMap<>();
 
-    public TileDownloader(String apiKey, double latitude, double longitude, double radius) {
+    public TileDownloader(VoxelEarth plugin, String apiKey, double latitude, double longitude, double radius) {
+        this.plugin = plugin;
         this.apiKey = apiKey;
         this.latitude = latitude;
         this.longitude = longitude;
@@ -59,11 +69,25 @@ public class TileDownloader {
         return tileTranslations;
     }
 
+    private void parseCopyrightLine(String line, UUID playerId) {
+        // Expected format: "ASSET_COPYRIGHT <filename>.glb Google;Airbus"
+        String rest = line.substring("ASSET_COPYRIGHT".length()).trim();
+        int spaceIndex = rest.indexOf(' ');
+        if (spaceIndex < 0) return; // malformed
+        String tileFile = rest.substring(0, spaceIndex).trim();
+        String namesPart = rest.substring(spaceIndex).trim(); 
+        String[] owners = namesPart.split(";");
+        if (owners.length > 0) {
+            // Notify the plugin for this player.
+            plugin.addCopyrightAttributions(playerId, Arrays.asList(owners));
+        }
+    }
+    
     /**
      * Call the Node.js script to fetch & rotate tiles.
      * Returns the .glb filenames that were downloaded, in the order the script printed them.
      */
-    public List<String> downloadTiles(String outputDirectory) throws IOException, InterruptedException {
+    public List<String> downloadTiles(String outputDirectory, UUID playerId) throws IOException, InterruptedException {
         long start = System.currentTimeMillis();
 
         // Build the command
@@ -111,6 +135,11 @@ public class TileDownloader {
                     String jsonPart = line.substring("ORIGIN_TRANSLATION".length()).trim();
                     JSONArray arr = new JSONArray(jsonPart);
                     capturedOrigin = new double[]{ arr.getDouble(0), arr.getDouble(1), arr.getDouble(2) };
+                }
+                else if (line.startsWith("ASSET_COPYRIGHT")) {
+                    // Format: "ASSET_COPYRIGHT <filename>.glb name1;name2;..."
+                    // e.g.   "ASSET_COPYRIGHT 0667e62652ab550c8d1858cbfc6307f74c304110.glb Google;Airbus"
+                    parseCopyrightLine(line, playerId);
                 }
                 // if line starts with TILE_TRANSLATION ...
                 else if (line.startsWith("TILE_TRANSLATION")) {

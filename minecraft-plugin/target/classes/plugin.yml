@@ -26,6 +26,16 @@ commands:
     usage: /visit <location>
     permission: voxelearth.visit
     permission-message: You don't have permission to use the visit command.
+  visitradius:
+    description: Set the radius of your /visit command's geocoder.
+    usage: /visitradius <radius>
+    permission: voxelearth.visit
+    permission-message: You don't have permission to use the visitradius command.
+  radius:
+    description: Set the radius of auto-geocoded movement within the world.
+    usage: /radius <radius>
+    permission: voxelearth.visit
+    permission-message: You don't have permission to use the radius command.
 permissions:
   voxelearth.createcustomworld:
     description: Allows creating custom worlds with VoxelEarth.
