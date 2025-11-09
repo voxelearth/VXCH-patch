@@ -1,3 +1,10 @@
+> ⚠️ **VXCH Patch Notice**
+>
+> 🧩 This branch is a **diverged patch** from the [*Voxel Earth* Minecraft plugin](https://github.com/ryanhlewis/VoxelEarth).  
+> 🧪 Repository is **temporary** and will be **deleted once VXCH (5× speed)** is merged back into the main Voxel Earth project.  
+> 💾 Use for **testing and benchmarking only**.
+
+
 # Voxel Earth
 Voxel Earth is a pipeline aimed at converting photogrammetry data into voxel-based landscapes, creating a detailed voxel representation of the Earth. This project leverages high-resolution 3D Tiles from various sources and transforms them into interactive, voxelized worlds, primarily for use in Minecraft and VR environments.
 
